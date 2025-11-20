@@ -21,7 +21,7 @@ audio_paths = [
     "audio/4_bird.wav", "audio/5_horse.wav", "audio/6_mouse.wav"
 ]
 
-images = [pygame.transform.scale(pygame.image.load(p), (250, 150)) for p in image_paths]
+images = [pygame.transform.scale(pygame.image.load(p), (int(SCREEN_W * 0.25), int(SCREEN_H * 0.35))) for p in image_paths]
 sounds = [pygame.mixer.Sound(a) for a in audio_paths]
 
 
@@ -51,9 +51,9 @@ def menu_screen():
         w = int( SCREEN_W * 0.25 )
         h = int( SCREEN_H * 0.20 )
         x = int( (SCREEN_W - w) // 2)
-        talk_btn = draw_button("Talk", x, SCREEN_H * 0.15, w, h)
-        game_btn = draw_button("Game", x, SCREEN_H * 0.40, w, h)
-        exit_btn = draw_button("Exit", x, SCREEN_H * 0.65, w, h)
+        talk_btn = draw_button("Talk", x, int(SCREEN_H * 0.15), w, h)
+        game_btn = draw_button("Game", x, int(SCREEN_H * 0.40), w, h)
+        exit_btn = draw_button("Exit", x, int(SCREEN_H * 0.65), w, h)
 
         pygame.display.update()
 
@@ -92,17 +92,17 @@ def talk_screen():
 def game_screen():
     # Positions of the 6 rectangles
     grid_positions = [
-        (50, 100), (300, 100), (550, 100),
-        (50, 270), (300, 270), (550, 270),
+        (int(SCREEN_W * 0.075), int(SCREEN_H * 0.20)), (int(SCREEN_W * 0.375), int(SCREEN_H * 0.20)), (int(SCREEN_W * 0.675), int(SCREEN_H * 0.20)),
+        (int(SCREEN_W * 0.075), int(SCREEN_H * 0.60)), (int(SCREEN_W * 0.375), int(SCREEN_H * 0.60)), (int(SCREEN_W * 0.675), int(SCREEN_H * 0.60)),
     ]
 
     # Rects for mouse hit detection
-    grid_rects = [pygame.Rect(x, y, 200, 130) for (x, y) in grid_positions]
+    grid_rects = [pygame.Rect(x, y, int(SCREEN_W * 0.25), int(SCREEN_H * 0.35)) for (x, y) in grid_positions]
 
     game_started = False       # becomes True after pressing "Start Game"
     current_index = None       # which animal is currently visible
     sound_end_time = 0         # time when the current sound should end (ms)
-
+    
     running = True
     while running:
         now = pygame.time.get_ticks()
@@ -112,12 +112,14 @@ def game_screen():
             current_index = None  # hide the animal after sound finishes
 
         screen.fill((255, 255, 255))
-
+    
         # Toolbar
-        menu_btn = draw_button("Menu", 20, 10, 150, 60)
-        start_btn = draw_button("Start Game", 230, 10, 200, 60)
-        exit_btn = draw_button("Exit", 560, 10, 200, 60)
-
+        w = int( SCREEN_W * 0.20 )
+        h = int( SCREEN_H * 0.10 )
+        y = int( SCREEN_H * 0.05 )
+        menu_btn = draw_button("Menu", int(SCREEN_W * 0.10), y, w, h)
+        start_btn = draw_button("Start Game", int(SCREEN_W * 0.40), y, w, h)
+        exit_btn = draw_button("Exit", int(SCREEN_W * 0.70), y, w, h)
         # Draw grid: either empty rectangles or show the image if it's active
         for i, (x, y) in enumerate(grid_positions):
             rect = grid_rects[i]
