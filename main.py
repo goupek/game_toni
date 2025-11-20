@@ -4,10 +4,9 @@ import sys
 
 pygame.init()
 pygame.mixer.init()
-
-SCREEN_W, SCREEN_H = 800, 480
+infoObject = pygame.display.Info()
+SCREEN_W, SCREEN_H = infoObject.current_w, infoObject.current_h
 screen = pygame.display.set_mode((SCREEN_W, SCREEN_H), pygame.FULLSCREEN)
-font = pygame.font.SysFont("Arial", 40)
 
 # ----------------------------
 # LOAD IMAGES & AUDIO
@@ -28,9 +27,11 @@ sounds = [pygame.mixer.Sound(a) for a in audio_paths]
 
 # ----------------------------
 # HELPER: draw a button
+# x, y - Top Left point
 # ----------------------------
 def draw_button(text, x, y, w, h, color=(200, 200, 200)):
     pygame.draw.rect(screen, color, (x, y, w, h))
+    font = pygame.font.SysFont("Arial", h // 2)
     label = font.render(text, True, (0, 0, 0))
     screen.blit(
         label,
@@ -46,10 +47,13 @@ def draw_button(text, x, y, w, h, color=(200, 200, 200)):
 def menu_screen():
     while True:
         screen.fill((255, 255, 255))
-
-        talk_btn = draw_button("Talk", 275, 120, 250, 80)
-        game_btn = draw_button("Game", 275, 260, 250, 80)
-        exit_btn = draw_button("Exit", 275, 400, 250, 60)
+        
+        w = int( SCREEN_W * 0.25 )
+        h = int( SCREEN_H * 0.20 )
+        x = int( (SCREEN_W - w) // 2)
+        talk_btn = draw_button("Talk", x, SCREEN_H * 0.15, w, h)
+        game_btn = draw_button("Game", x, SCREEN_H * 0.40, w, h)
+        exit_btn = draw_button("Exit", x, SCREEN_H * 0.65, w, h)
 
         pygame.display.update()
 
