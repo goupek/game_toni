@@ -1,6 +1,5 @@
 import pygame
 import subprocess
-import time
 import sys
 
 pygame.init()
@@ -33,7 +32,11 @@ sounds = [pygame.mixer.Sound(a) for a in audio_paths]
 def draw_button(text, x, y, w, h, color=(200, 200, 200)):
     pygame.draw.rect(screen, color, (x, y, w, h))
     label = font.render(text, True, (0, 0, 0))
-    screen.blit(label, (x + (w-label.get_width())//2, y + (h-label.get_height())//2))
+    screen.blit(
+        label,
+        (x + (w - label.get_width()) // 2,
+         y + (h - label.get_height()) // 2),
+    )
     return pygame.Rect(x, y, w, h)
 
 
@@ -46,6 +49,7 @@ def menu_screen():
 
         talk_btn = draw_button("Talk", 275, 120, 250, 80)
         game_btn = draw_button("Game", 275, 260, 250, 80)
+        exit_btn = draw_button("Exit", 275, 400, 250, 60)
 
         pygame.display.update()
 
@@ -58,41 +62,65 @@ def menu_screen():
                     talk_screen()
                 if game_btn.collidepoint(event.pos):
                     game_screen()
+                if exit_btn.collidepoint(event.pos):
+                    pygame.quit()
+                    sys.exit()
 
 
 # ----------------------------
 # PAGE 2: TALK VIDEO
 # ----------------------------
 def talk_screen():
+    # Plays video, then returns to the menu loop
     subprocess.call([
         "mpv",
         "--fs",
         "--no-osd-bar",
         "--quiet",
-        "eyes.mp4"
+        "eyes.mp4",
     ])
-    menu_screen()
+    return
 
 
 # ----------------------------
-# PAGE 3: GAME SCREEN
+# PAGE 3: GAME SCREEN (INTERACTIVE)
 # ----------------------------
 def game_screen():
+    # Positions of the 6 rectangles
     grid_positions = [
         (50, 100), (300, 100), (550, 100),
         (50, 270), (300, 270), (550, 270),
     ]
 
-    while True:
+    # Rects for mouse hit detection
+    grid_rects = [pygame.Rect(x, y, 200, 130) for (x, y) in grid_positions]
+
+    game_started = False       # becomes True after pressing "Start Game"
+    current_index = None       # which animal is currently visible
+    sound_end_time = 0         # time when the current sound should end (ms)
+
+    running = True
+    while running:
+        now = pygame.time.get_ticks()
+
+        # If a sound is playing, check if it should stop showing the image
+        if current_index is not None and now >= sound_end_time:
+            current_index = None  # hide the animal after sound finishes
+
         screen.fill((255, 255, 255))
 
         # Toolbar
         menu_btn = draw_button("Menu", 20, 10, 150, 60)
-        start_btn = draw_button("Start Game", 630, 10, 150, 60)
+        start_btn = draw_button("Start Game", 230, 10, 200, 60)
+        exit_btn = draw_button("Exit", 560, 10, 200, 60)
 
-        # Empty grid borders
-        for (x, y) in grid_positions:
-            pygame.draw.rect(screen, (0, 0, 0), (x, y, 200, 130), 3)
+        # Draw grid: either empty rectangles or show the image if it's active
+        for i, (x, y) in enumerate(grid_positions):
+            rect = grid_rects[i]
+            pygame.draw.rect(screen, (0, 0, 0), rect, 3)
+            if game_started and current_index == i:
+                img = images[i]
+                screen.blit(img, (x, y))
 
         pygame.display.update()
 
@@ -100,36 +128,34 @@ def game_screen():
             if event.type == pygame.QUIT:
                 pygame.quit()
                 sys.exit()
+
             if event.type == pygame.MOUSEBUTTONDOWN:
+                # Menu: go back to main menu
                 if menu_btn.collidepoint(event.pos):
-                    menu_screen()
+                    return  # back to menu_screen
+
+                # Exit: close the whole program
+                if exit_btn.collidepoint(event.pos):
+                    pygame.quit()
+                    sys.exit()
+
+                # Start Game: enable clicking rectangles
                 if start_btn.collidepoint(event.pos):
-                    run_game(grid_positions)
+                    game_started = True
+                    current_index = None
+                    continue
 
-
-# ----------------------------
-# GAME SEQUENCE: show images + play audio
-# ----------------------------
-def run_game(grid_positions):
-    for i in range(6):
-        screen.fill((255, 255, 255))
-
-        # Draw toolbar again
-        draw_button("Menu", 20, 10, 150, 60)
-        draw_button("Start Game", 630, 10, 150, 60)
-
-        # Show image
-        img = images[i]
-        x, y = grid_positions[i]
-        screen.blit(img, (x, y))
-
-        pygame.display.update()
-
-        # Play sound
-        sounds[i].play()
-
-        # Wait until audio finishes
-        time.sleep(sounds[i].get_length())
+                # If game has started, handle clicks on rectangles
+                if game_started:
+                    # Only allow starting a new sound if none is currently active
+                    if current_index is None:
+                        for i, rect in enumerate(grid_rects):
+                            if rect.collidepoint(event.pos):
+                                current_index = i
+                                sounds[i].play()
+                                length_ms = int(sounds[i].get_length() * 1000)
+                                sound_end_time = pygame.time.get_ticks() + length_ms
+                                break
 
 
 # ----------------------------
