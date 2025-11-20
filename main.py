@@ -40,6 +40,29 @@ def draw_button(text, x, y, w, h, color=(200, 200, 200)):
     )
     return pygame.Rect(x, y, w, h)
 
+def generate_grid(w_r, h_r, k = 1, l = 1, x1 = 0, y1 = 0, x2 = 100, y2 = 100):
+    """
+    Generate grid points for a grid of rectangles
+    
+    Parameters:
+        x1, y1  (float) Top Left point of a rect space (in a ratio)
+        x2, y2  (float) Bottom Right point of a rect space (in a ratio)
+        w_r, h_r (float) width and height for each rectangle (in a ratio)
+        k (int) Number of colums
+        l (int) Number of rows
+        
+    Raises:
+        ValueError: if the rectangles are too big for allocated space
+    """    
+    if w_r * k > (x2 - x1) or h_r * l > (y2 - y1):
+        raise ValueError("k x l rectangles of such size don't fit in the allocated space")
+    matrix = []
+    hor_pad = ((x2 - x1) - w_r * k) / (k - 1) if k > 1 else 0
+    ver_pad = ((y2 - y1) - h_r * l) / (l - 1) if l > 1 else 0
+    for j in range(l):
+        for i in range(k):
+            matrix.append((int((x1 + i * (hor_pad + w_r)) * SCREEN_W), int((y1 + j * (ver_pad + h_r))*SCREEN_H)))
+    return matrix
 
 # ----------------------------
 # PAGE 1: MAIN MENU
@@ -47,13 +70,12 @@ def draw_button(text, x, y, w, h, color=(200, 200, 200)):
 def menu_screen():
     while True:
         screen.fill((255, 255, 255))
-        
-        w = int( SCREEN_W * 0.25 )
-        h = int( SCREEN_H * 0.20 )
-        x = int( (SCREEN_W - w) // 2)
-        talk_btn = draw_button("Talk", x, int(SCREEN_H * 0.15), w, h)
-        game_btn = draw_button("Game", x, int(SCREEN_H * 0.40), w, h)
-        exit_btn = draw_button("Exit", x, int(SCREEN_H * 0.65), w, h)
+        w_r, h_r = 0.25, 0.20
+        w, h = int(SCREEN_W * w_r), int(SCREEN_H * h_r)
+        grid = generate_grid(w_r, h_r, 1, 3, 0.375, 0.15, 1-0.375, 1-0.15)
+        talk_btn = draw_button("Talk", grid[0][0], grid[0][1], w, h)
+        game_btn = draw_button("Game", grid[1][0], grid[1][1], w, h)
+        exit_btn = draw_button("Exit", grid[2][0], grid[2][1], w, h)
 
         pygame.display.update()
 
@@ -91,13 +113,11 @@ def talk_screen():
 # ----------------------------
 def game_screen():
     # Positions of the 6 rectangles
-    grid_positions = [
-        (int(SCREEN_W * 0.075), int(SCREEN_H * 0.20)), (int(SCREEN_W * 0.375), int(SCREEN_H * 0.20)), (int(SCREEN_W * 0.675), int(SCREEN_H * 0.20)),
-        (int(SCREEN_W * 0.075), int(SCREEN_H * 0.60)), (int(SCREEN_W * 0.375), int(SCREEN_H * 0.60)), (int(SCREEN_W * 0.675), int(SCREEN_H * 0.60)),
-    ]
-
+    w_r, h_r = 0.25, 0.35
+    w, h = int(SCREEN_W * w_r), int(SCREEN_H * h_r)
+    grid_positions = generate_grid(w_r, h_r, 3, 2, 0.075, 0.20, 0.925, 0.95)
     # Rects for mouse hit detection
-    grid_rects = [pygame.Rect(x, y, int(SCREEN_W * 0.25), int(SCREEN_H * 0.35)) for (x, y) in grid_positions]
+    grid_rects = [pygame.Rect(x, y, w, h) for (x, y) in grid_positions]
 
     game_started = False       # becomes True after pressing "Start Game"
     current_index = None       # which animal is currently visible
@@ -114,12 +134,12 @@ def game_screen():
         screen.fill((255, 255, 255))
     
         # Toolbar
-        w = int( SCREEN_W * 0.20 )
-        h = int( SCREEN_H * 0.10 )
-        y = int( SCREEN_H * 0.05 )
-        menu_btn = draw_button("Menu", int(SCREEN_W * 0.10), y, w, h)
-        start_btn = draw_button("Start Game", int(SCREEN_W * 0.40), y, w, h)
-        exit_btn = draw_button("Exit", int(SCREEN_W * 0.70), y, w, h)
+        w_r, h_r = 0.20, 0.10
+        w, h = int(SCREEN_W * w_r), int(SCREEN_H * h_r)
+        grid = generate_grid(w_r, h_r, 3, 1, 0.10, 0.05, 0.90, 0.20)
+        menu_btn = draw_button("Menu", grid[0][0], grid[0][1], w, h)
+        start_btn = draw_button("Start Game", grid[1][0], grid[1][1], w, h)
+        exit_btn = draw_button("Exit", grid[2][0], grid[2][1], w, h)
         # Draw grid: either empty rectangles or show the image if it's active
         for i, (x, y) in enumerate(grid_positions):
             rect = grid_rects[i]
