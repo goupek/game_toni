@@ -178,9 +178,9 @@ STORIES = [
         "options": ["синяя", "красная", "чёрная"],
         "correct": "синяя",
         "option_audio": {
-            "синяя": "blue_fem_ru.mp3",
-            "красная": "red_fem_ru.mp3",
-            "чёрная": "black_fem_ru.mp3",
+            "синяя": "blue.mp3",
+            "красная": "red.mp3",
+            "чёрная": "black.mp3",
         },
     },
 ]
