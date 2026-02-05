@@ -1,0 +1,154 @@
+{
+  "lessons": [
+    {
+      "lesson_id": 1,
+      "title": "Greetings & Farewells",
+      "words": [
+        {
+          "word_id": "L1_W1",
+          "russian": "Привет",
+          "english": "Hello (informal)",
+          "pronunciation": "pree-vyet",
+          "example_russian": "Привет, как дела?",
+          "example_english": "Hello, how are you?"
+        },
+        {
+          "word_id": "L1_W2",
+          "russian": "Пока",
+          "english": "Bye (informal)",
+          "pronunciation": "pa-ka",
+          "example_russian": "Пока, до завтра!",
+          "example_english": "Bye, see you tomorrow!"
+        },
+        {
+          "word_id": "L1_W3",
+          "russian": "Здравствуйте",
+          "english": "Hello (formal)",
+          "pronunciation": "zdrav-stvuy-te",
+          "example_russian": "Здравствуйте, Иван Петрович.",
+          "example_english": "Hello, Ivan Petrovich."
+        }
+      ]
+    },
+    {
+      "lesson_id": 2,
+      "title": "Essential Politeness",
+      "words": [
+        {
+          "word_id": "L2_W1",
+          "russian": "Спасибо",
+          "english": "Thank you",
+          "pronunciation": "spa-see-ba",
+          "example_russian": "Спасибо за помощь.",
+          "example_english": "Thank you for the help."
+        },
+        {
+          "word_id": "L2_W2",
+          "russian": "Пожалуйста",
+          "english": "Please / You're welcome",
+          "pronunciation": "pa-zhal-sta",
+          "example_russian": "Дайте, пожалуйста, воды.",
+          "example_english": "Give me water, please."
+        },
+        {
+          "word_id": "L2_W3",
+          "russian": "Извините",
+          "english": "Excuse me / Sorry",
+          "pronunciation": "iz-vi-ni-te",
+          "example_russian": "Извините, где метро?",
+          "example_english": "Excuse me, where is the metro?"
+        }
+      ]
+    },
+    {
+      "lesson_id": 3,
+      "title": "Basic Identity",
+      "words": [
+        {
+          "word_id": "L3_W1",
+          "russian": "Да",
+          "english": "Yes",
+          "pronunciation": "da",
+          "example_russian": "Вы говорите по-английски? Да.",
+          "example_english": "Do you speak English? Yes."
+        },
+        {
+          "word_id": "L3_W2",
+          "russian": "Нет",
+          "english": "No",
+          "pronunciation": "nyet",
+          "example_russian": "Это ваш дом? Нет.",
+          "example_english": "Is this your house? No."
+        },
+        {
+          "word_id": "L3_W3",
+          "russian": "Меня зовут...",
+          "english": "My name is...",
+          "pronunciation": "men-ya za-vut",
+          "example_russian": "Меня зовут Анна.",
+          "example_english": "My name is Anna."
+        }
+      ]
+    },
+    {
+      "lesson_id": 4,
+      "title": "Simple Questions",
+      "words": [
+        {
+          "word_id": "L4_W1",
+          "russian": "Кто",
+          "english": "Who",
+          "pronunciation": "kto",
+          "example_russian": "Кто это?",
+          "example_english": "Who is this?"
+        },
+        {
+          "word_id": "L4_W2",
+          "russian": "Что",
+          "english": "What",
+          "pronunciation": "shto",
+          "example_russian": "Что это?",
+          "example_english": "What is this?"
+        },
+        {
+          "word_id": "L4_W3",
+          "russian": "Где",
+          "english": "Where",
+          "pronunciation": "gdye",
+          "example_russian": "Где банк?",
+          "example_english": "Where is the bank?"
+        }
+      ]
+    },
+    {
+      "lesson_id": 5,
+      "title": "Numbers 1-3",
+      "words": [
+        {
+          "word_id": "L5_W1",
+          "russian": "Один",
+          "english": "One",
+          "pronunciation": "a-din",
+          "example_russian": "У меня один билет.",
+          "example_english": "I have one ticket."
+        },
+        {
+          "word_id": "L5_W2",
+          "russian": "Два",
+          "english": "Two",
+          "pronunciation": "dva",
+          "example_russian": "Два кофе, пожалуйста.",
+          "example_english": "Two coffees, please."
+        },
+        {
+          "word_id": "L5_W3",
+          "russian": "Три",
+          "english": "Three",
+          "pronunciation": "tri",
+          "example_russian": "Три рубля.",
+          "example_english": "Three rubles."
+        }
+      ]
+    }
+  ]
+}
