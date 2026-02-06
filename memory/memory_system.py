@@ -129,44 +129,32 @@ class Memory:
             loaded = self._load_from_db()
             if not loaded:
                 # Initialize default blocks if nothing in database
-                # INSIDE the Memory class __post_init__ method
-
+                # --- THIS IS THE SECTION TO CHECK AND FIX ---
                 self.blocks = [
                     Block(
                         label="persona",
-                        # NEW VALUE:
-                        value="I am Anya, a Russian language tutor. My goal is to help the user learn A1 level Russian through simple lessons, vocabulary, and exercises.",
+                        value="You are EDU-BOT, an empathetic, patient, and supportive AI language tutor.",
                         limit=2000,
-                        description="Your identity as a language tutor."
+                        description="Your identity as a friendly, non-judgmental AI tutor."
                     ),
                     Block(
                         label="human",
-                        # NEW VALUE:
-                        value="The user is an English speaker starting to learn Russian. They currently know no vocabulary.",
+                        value="The user is a native English speaker learning A1-level Russian.",
                         limit=2000,
-                        description="Everything about the student: their progress, learned words, common mistakes, and goals."
+                        description="Everything about the student: their name, preferences, and goals."
                     ),
-                                    # --- ADD THE NEW BLOCK HERE ---
                     Block(
                         label="lesson_progress",
                         value='{"current_lesson_id": 1, "learned_word_ids": []}',
-                        limit=4000, # Increased limit for longer lists
-                        description="A structured log of the student's learning journey. Tracks completed lessons, current topic, and a list of known vocabulary/concepts."
+                        limit=4000,
+                        description="A JSON object tracking the student's learning journey."
                     ),
-
-                    Block(
-                    label="interaction_state",
-                    value="awaiting_user_command",
-                    limit=500,
-                    description="Tracks the immediate conversational state. For example: 'awaiting_pronunciation_check', 'awaiting_quiz_answer', or 'awaiting_user_command'."
-                    ),
-
                     Block(
                         label="system",
-                        value="Current session started. No previous interactions loaded.",
+                        value="Current session started.",
                         limit=1000,
-                        description="System state, session info, and technical status. Read-only - managed automatically.",
-                        read_only=True  # Protect system block from edits
+                        description="System state, session info, and technical status.",
+                        read_only=True
                     )
                 ]
                 self._save_to_db()
