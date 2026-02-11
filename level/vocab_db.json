@@ -1,0 +1,293 @@
+{
+  "meta": {
+    "language": "ru",
+    "level": "A1 (toddler-friendly)",
+    "audience": "toddlers",
+    "schema": {
+      "word": { "ru": "string", "en": "string", "pos": "string" }
+    }
+  },
+  "topics": [
+    {
+      "id": "family",
+      "name_ru": "Семья",
+      "words": [
+        { "ru": "мама", "en": "mom", "pos": "noun" },
+        { "ru": "папа", "en": "dad", "pos": "noun" },
+        { "ru": "бабушка", "en": "grandma", "pos": "noun" },
+        { "ru": "дедушка", "en": "grandpa", "pos": "noun" },
+        { "ru": "брат", "en": "brother", "pos": "noun" },
+        { "ru": "сестра", "en": "sister", "pos": "noun" },
+        { "ru": "я", "en": "I", "pos": "pronoun" },
+        { "ru": "ты", "en": "you (singular)", "pos": "pronoun" },
+        { "ru": "он", "en": "he", "pos": "pronoun" },
+        { "ru": "она", "en": "she", "pos": "pronoun" },
+        { "ru": "мы", "en": "we", "pos": "pronoun" },
+        { "ru": "они", "en": "they", "pos": "pronoun" }
+      ]
+    },
+    {
+      "id": "greetings",
+      "name_ru": "Приветствия и вежливость",
+      "words": [
+        { "ru": "привет", "en": "hi", "pos": "interjection" },
+        { "ru": "пока", "en": "bye", "pos": "interjection" },
+        { "ru": "здравствуй", "en": "hello", "pos": "interjection" },
+        { "ru": "спасибо", "en": "thank you", "pos": "interjection" },
+        { "ru": "пожалуйста", "en": "please / you're welcome", "pos": "interjection" },
+        { "ru": "да", "en": "yes", "pos": "particle" },
+        { "ru": "нет", "en": "no", "pos": "particle" },
+        { "ru": "можно", "en": "may I / allowed", "pos": "modal" },
+        { "ru": "нельзя", "en": "not allowed", "pos": "modal" }
+      ]
+    },
+    {
+      "id": "colors",
+      "name_ru": "Цвета",
+      "words": [
+        { "ru": "красный", "en": "red", "pos": "adj" },
+        { "ru": "синий", "en": "blue", "pos": "adj" },
+        { "ru": "зелёный", "en": "green", "pos": "adj" },
+        { "ru": "жёлтый", "en": "yellow", "pos": "adj" },
+        { "ru": "белый", "en": "white", "pos": "adj" },
+        { "ru": "чёрный", "en": "black", "pos": "adj" },
+        { "ru": "розовый", "en": "pink", "pos": "adj" },
+        { "ru": "оранжевый", "en": "orange", "pos": "adj" },
+        { "ru": "серый", "en": "gray", "pos": "adj" },
+        { "ru": "коричневый", "en": "brown", "pos": "adj" }
+      ]
+    },
+    {
+      "id": "numbers",
+      "name_ru": "Числа (1–10)",
+      "words": [
+        { "ru": "один", "en": "one", "pos": "num" },
+        { "ru": "два", "en": "two", "pos": "num" },
+        { "ru": "три", "en": "three", "pos": "num" },
+        { "ru": "четыре", "en": "four", "pos": "num" },
+        { "ru": "пять", "en": "five", "pos": "num" },
+        { "ru": "шесть", "en": "six", "pos": "num" },
+        { "ru": "семь", "en": "seven", "pos": "num" },
+        { "ru": "восемь", "en": "eight", "pos": "num" },
+        { "ru": "девять", "en": "nine", "pos": "num" },
+        { "ru": "десять", "en": "ten", "pos": "num" }
+      ]
+    },
+    {
+      "id": "body",
+      "name_ru": "Тело",
+      "words": [
+        { "ru": "голова", "en": "head", "pos": "noun" },
+        { "ru": "волосы", "en": "hair", "pos": "noun" },
+        { "ru": "лицо", "en": "face", "pos": "noun" },
+        { "ru": "глаза", "en": "eyes", "pos": "noun" },
+        { "ru": "нос", "en": "nose", "pos": "noun" },
+        { "ru": "рот", "en": "mouth", "pos": "noun" },
+        { "ru": "зубы", "en": "teeth", "pos": "noun" },
+        { "ru": "ухо", "en": "ear", "pos": "noun" },
+        { "ru": "рука", "en": "hand/arm", "pos": "noun" },
+        { "ru": "нога", "en": "leg/foot", "pos": "noun" },
+        { "ru": "палец", "en": "finger/toe", "pos": "noun" },
+        { "ru": "живот", "en": "belly", "pos": "noun" },
+        { "ru": "спина", "en": "back", "pos": "noun" }
+      ]
+    },
+    {
+      "id": "actions",
+      "name_ru": "Действия (простые глаголы)",
+      "words": [
+        { "ru": "идти", "en": "to go (walk)", "pos": "verb" },
+        { "ru": "бежать", "en": "to run", "pos": "verb" },
+        { "ru": "сидеть", "en": "to sit", "pos": "verb" },
+        { "ru": "стоять", "en": "to stand", "pos": "verb" },
+        { "ru": "спать", "en": "to sleep", "pos": "verb" },
+        { "ru": "есть", "en": "to eat", "pos": "verb" },
+        { "ru": "пить", "en": "to drink", "pos": "verb" },
+        { "ru": "играть", "en": "to play", "pos": "verb" },
+        { "ru": "читать", "en": "to read", "pos": "verb" },
+        { "ru": "рисовать", "en": "to draw", "pos": "verb" },
+        { "ru": "слушать", "en": "to listen", "pos": "verb" },
+        { "ru": "смотреть", "en": "to look/watch", "pos": "verb" },
+        { "ru": "мыть", "en": "to wash", "pos": "verb" },
+        { "ru": "одеваться", "en": "to get dressed", "pos": "verb" },
+        { "ru": "открыть", "en": "to open", "pos": "verb" },
+        { "ru": "закрыть", "en": "to close", "pos": "verb" },
+        { "ru": "дай", "en": "give (me)", "pos": "verb" },
+        { "ru": "возьми", "en": "take", "pos": "verb" }
+      ]
+    },
+    {
+      "id": "food",
+      "name_ru": "Еда и напитки",
+      "words": [
+        { "ru": "вода", "en": "water", "pos": "noun" },
+        { "ru": "сок", "en": "juice", "pos": "noun" },
+        { "ru": "чай", "en": "tea", "pos": "noun" },
+        { "ru": "молоко", "en": "milk", "pos": "noun" },
+        { "ru": "хлеб", "en": "bread", "pos": "noun" },
+        { "ru": "сыр", "en": "cheese", "pos": "noun" },
+        { "ru": "каша", "en": "porridge", "pos": "noun" },
+        { "ru": "суп", "en": "soup", "pos": "noun" },
+        { "ru": "яблоко", "en": "apple", "pos": "noun" },
+        { "ru": "банан", "en": "banana", "pos": "noun" },
+        { "ru": "груша", "en": "pear", "pos": "noun" },
+        { "ru": "печенье", "en": "cookie/biscuit", "pos": "noun" },
+        { "ru": "конфета", "en": "candy", "pos": "noun" },
+        { "ru": "йогурт", "en": "yogurt", "pos": "noun" },
+        { "ru": "яйцо", "en": "egg", "pos": "noun" }
+      ]
+    },
+    {
+      "id": "home",
+      "name_ru": "Дом",
+      "words": [
+        { "ru": "дом", "en": "home/house", "pos": "noun" },
+        { "ru": "комната", "en": "room", "pos": "noun" },
+        { "ru": "кухня", "en": "kitchen", "pos": "noun" },
+        { "ru": "ванна", "en": "bathroom/bath", "pos": "noun" },
+        { "ru": "кровать", "en": "bed", "pos": "noun" },
+        { "ru": "стол", "en": "table", "pos": "noun" },
+        { "ru": "стул", "en": "chair", "pos": "noun" },
+        { "ru": "диван", "en": "sofa", "pos": "noun" },
+        { "ru": "шкаф", "en": "wardrobe/cabinet", "pos": "noun" },
+        { "ru": "дверь", "en": "door", "pos": "noun" },
+        { "ru": "окно", "en": "window", "pos": "noun" },
+        { "ru": "свет", "en": "light", "pos": "noun" },
+        { "ru": "лампа", "en": "lamp", "pos": "noun" }
+      ]
+    },
+    {
+      "id": "toys",
+      "name_ru": "Игрушки",
+      "words": [
+        { "ru": "игрушка", "en": "toy", "pos": "noun" },
+        { "ru": "мяч", "en": "ball", "pos": "noun" },
+        { "ru": "кукла", "en": "doll", "pos": "noun" },
+        { "ru": "машинка", "en": "toy car", "pos": "noun" },
+        { "ru": "мишка", "en": "teddy bear", "pos": "noun" },
+        { "ru": "пирамидка", "en": "stacking rings", "pos": "noun" },
+        { "ru": "кубик", "en": "block/cube", "pos": "noun" },
+        { "ru": "пазл", "en": "puzzle", "pos": "noun" },
+        { "ru": "книга", "en": "book", "pos": "noun" },
+        { "ru": "рисунок", "en": "drawing", "pos": "noun" }
+      ]
+    },
+    {
+      "id": "clothes",
+      "name_ru": "Одежда",
+      "words": [
+        { "ru": "шапка", "en": "hat", "pos": "noun" },
+        { "ru": "куртка", "en": "jacket", "pos": "noun" },
+        { "ru": "пальто", "en": "coat", "pos": "noun" },
+        { "ru": "кофта", "en": "sweater", "pos": "noun" },
+        { "ru": "футболка", "en": "T-shirt", "pos": "noun" },
+        { "ru": "штаны", "en": "pants", "pos": "noun" },
+        { "ru": "платье", "en": "dress", "pos": "noun" },
+        { "ru": "носок", "en": "sock", "pos": "noun" },
+        { "ru": "обувь", "en": "shoes/footwear", "pos": "noun" },
+        { "ru": "ботинок", "en": "boot/shoe", "pos": "noun" }
+      ]
+    },
+    {
+      "id": "animals",
+      "name_ru": "Животные",
+      "words": [
+        { "ru": "кот", "en": "cat (male)", "pos": "noun" },
+        { "ru": "кошка", "en": "cat", "pos": "noun" },
+        { "ru": "собака", "en": "dog", "pos": "noun" },
+        { "ru": "птица", "en": "bird", "pos": "noun" },
+        { "ru": "рыба", "en": "fish", "pos": "noun" },
+        { "ru": "лошадь", "en": "horse", "pos": "noun" },
+        { "ru": "корова", "en": "cow", "pos": "noun" },
+        { "ru": "овца", "en": "sheep", "pos": "noun" },
+        { "ru": "коза", "en": "goat", "pos": "noun" },
+        { "ru": "кролик", "en": "rabbit", "pos": "noun" },
+        { "ru": "медведь", "en": "bear", "pos": "noun" },
+        { "ru": "лиса", "en": "fox", "pos": "noun" }
+      ]
+    },
+    {
+      "id": "nature",
+      "name_ru": "Природа и погода",
+      "words": [
+        { "ru": "солнце", "en": "sun", "pos": "noun" },
+        { "ru": "луна", "en": "moon", "pos": "noun" },
+        { "ru": "звезда", "en": "star", "pos": "noun" },
+        { "ru": "небо", "en": "sky", "pos": "noun" },
+        { "ru": "облако", "en": "cloud", "pos": "noun" },
+        { "ru": "дождь", "en": "rain", "pos": "noun" },
+        { "ru": "снег", "en": "snow", "pos": "noun" },
+        { "ru": "ветер", "en": "wind", "pos": "noun" },
+        { "ru": "вода", "en": "water", "pos": "noun" },
+        { "ru": "дерево", "en": "tree", "pos": "noun" },
+        { "ru": "цветок", "en": "flower", "pos": "noun" }
+      ]
+    },
+    {
+      "id": "transport",
+      "name_ru": "Транспорт",
+      "words": [
+        { "ru": "машина", "en": "car", "pos": "noun" },
+        { "ru": "автобус", "en": "bus", "pos": "noun" },
+        { "ru": "поезд", "en": "train", "pos": "noun" },
+        { "ru": "самолёт", "en": "airplane", "pos": "noun" },
+        { "ru": "корабль", "en": "ship", "pos": "noun" },
+        { "ru": "велосипед", "en": "bicycle", "pos": "noun" }
+      ]
+    },
+    {
+      "id": "places",
+      "name_ru": "Места",
+      "words": [
+        { "ru": "улица", "en": "street", "pos": "noun" },
+        { "ru": "парк", "en": "park", "pos": "noun" },
+        { "ru": "магазин", "en": "shop/store", "pos": "noun" },
+        { "ru": "садик", "en": "kindergarten", "pos": "noun" },
+        { "ru": "школа", "en": "school", "pos": "noun" },
+        { "ru": "врач", "en": "doctor", "pos": "noun" }
+      ]
+    },
+    {
+      "id": "feelings",
+      "name_ru": "Чувства и состояния",
+      "words": [
+        { "ru": "хочу", "en": "I want", "pos": "verb" },
+        { "ru": "не хочу", "en": "I don't want", "pos": "phrase" },
+        { "ru": "нравится", "en": "I like", "pos": "verb" },
+        { "ru": "не нравится", "en": "I don't like", "pos": "phrase" },
+        { "ru": "больно", "en": "it hurts", "pos": "adv" },
+        { "ru": "холодно", "en": "cold", "pos": "adv" },
+        { "ru": "жарко", "en": "hot", "pos": "adv" },
+        { "ru": "весело", "en": "fun", "pos": "adv" },
+        { "ru": "грустно", "en": "sad", "pos": "adv" },
+        { "ru": "страшно", "en": "scary/afraid", "pos": "adv" },
+        { "ru": "устал", "en": "tired", "pos": "adj" }
+      ]
+    },
+    {
+      "id": "size",
+      "name_ru": "Размер и формы (простое)",
+      "words": [
+        { "ru": "большой", "en": "big", "pos": "adj" },
+        { "ru": "маленький", "en": "small", "pos": "adj" },
+        { "ru": "длинный", "en": "long", "pos": "adj" },
+        { "ru": "короткий", "en": "short", "pos": "adj" },
+        { "ru": "круг", "en": "circle", "pos": "noun" },
+        { "ru": "квадрат", "en": "square", "pos": "noun" }
+      ]
+    },
+    {
+      "id": "school_supplies",
+      "name_ru": "Для рисования и простые вещи",
+      "words": [
+        { "ru": "карандаш", "en": "pencil", "pos": "noun" },
+        { "ru": "ручка", "en": "pen", "pos": "noun" },
+        { "ru": "бумага", "en": "paper", "pos": "noun" },
+        { "ru": "краска", "en": "paint", "pos": "noun" },
+        { "ru": "кисть", "en": "brush", "pos": "noun" },
+        { "ru": "клей", "en": "glue", "pos": "noun" },
+        { "ru": "ножницы", "en": "scissors", "pos": "noun" }
+      ]
+    }
+  ]
+}
