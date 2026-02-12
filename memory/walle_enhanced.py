@@ -17,7 +17,7 @@ client = OpenAI(base_url="http://localhost:11434/v1", api_key="ollama")
 
 # Configuration
 USE_SEMANTIC_SEARCH = False  # Set to True to enable semantic search
-MODEL_NAME = "qwen3:1.7b"  # Or qwen3:0.6b for faster responses
+MODEL_NAME = "qwen3:0.6b"  # Or qwen3:0.6b for faster responses
 
 # Initialize memory systems
 core_memory = Memory()

@@ -1,1 +1,7 @@
 *.db
+assets
+__pycache__/
+*.pyc
+*.db
+*.index
+*.ids
