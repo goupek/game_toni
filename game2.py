@@ -344,18 +344,22 @@ class StoryGame:
         for rect, label in zip(self.ui.button_rects, rd["options"]):
             self.buttons.append(Button(rect, label, show_replay=True))
 
-        # Build generated image surface (square)
-        self.raw_image = build_round_surface(IMG_DIR, rd, canvas_size=ROUND_CANVAS_SIZE)
         self.rescale_current_image()
 
         # No prompt audio available from generator (keep UI replay button, but no sound)
 
     def rescale_current_image(self):
-        if self.raw_image:
-            pad = max(2, int(20 * self.ui.s))
-            self.fit_image = scale_fit(self.raw_image, self.ui.image_area.w - pad, self.ui.image_area.h - pad)
-        else:
-            self.fit_image = None
+        rd = self.rounds[self.index]
+
+        # Build a canvas that matches the CURRENT image_area aspect ratio
+        target_w = max(1, self.ui.image_area.w)
+        target_h = max(1, self.ui.image_area.h)
+
+        self.raw_image = build_round_surface(IMG_DIR, rd, canvas_size=(target_w, target_h))
+
+        pad = max(2, int(20 * self.ui.s))
+        self.fit_image = scale_fit(self.raw_image, target_w - pad, target_h - pad) if self.raw_image else None
+
 
     def on_resize(self, new_w, new_h):
         self.ui.rebuild(new_w, new_h)
