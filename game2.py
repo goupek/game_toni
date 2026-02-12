@@ -215,6 +215,7 @@ class UI:
     def rebuild(self, w: int, h: int):
         self.w, self.h = w, h
 
+        # --- scale factor vs "design" size ---
         sx = w / DESIGN_W
         sy = h / DESIGN_H
         self.s = min(sx, sy)
@@ -233,50 +234,102 @@ class UI:
         # Borders
         self.border_w = max(2, sc(6))
 
-        # Areas
-        self.title_area = pygame.Rect(sc(60), sc(10), w - sc(120), sc(70))
-        self.prompt_area = pygame.Rect(sc(60), sc(95), w - sc(120), sc(140))
+        # ----------------
+        # Common spacing
+        # ----------------
+        side_margin = sc(60)
+        content_left = side_margin
+        content_right = w - side_margin
+        content_w = content_right - content_left
 
-        # Prompt replay button (inside prompt area, top-right)
+        v_gap = sc(24)     # vertical spacing
+        h_gap = sc(40)     # gap between image and buttons
+        top_pad = sc(10)
+
+        # ----------------
+        # Title + Prompt
+        # ----------------
+        self.title_area = pygame.Rect(content_left, top_pad, content_w, sc(70))
+
+        self.prompt_area = pygame.Rect(
+            content_left,
+            self.title_area.bottom + sc(15),
+            content_w,
+            sc(150)
+        )
+
+        # Prompt replay button (top-right inside prompt)
         rep_size = sc(64)
-        pad = sc(12)
+        rep_pad = sc(12)
         self.prompt_replay = pygame.Rect(
-            self.prompt_area.right - rep_size - pad,
-            self.prompt_area.y + pad,
+            self.prompt_area.right - rep_size - rep_pad,
+            self.prompt_area.y + rep_pad,
             rep_size,
             rep_size
         )
 
-        top_y = sc(260)
-        self.image_area = pygame.Rect(sc(80), top_y, sc(520), sc(420))
+        # ----------------
+        # Progress bar (reserve bottom space)
+        # ----------------
+        progress_h = sc(24)
+        progress_bottom_pad = sc(60)
+        self.progress_bar = pygame.Rect(
+            content_left,
+            h - progress_bottom_pad,
+            content_w,
+            progress_h
+        )
 
-        # Buttons aligned to the RIGHT edge of the prompt box
-        by, bw, bh, gap = top_y, sc(300), sc(110), sc(30)
-        right_edge = self.prompt_area.right
-        bx = right_edge - bw
+        # ----------------
+        # Content region between prompt and progress
+        # ----------------
+        top_y = self.prompt_area.bottom + v_gap
+        bottom_y = self.progress_bar.y - v_gap
+        content_h = max(1, bottom_y - top_y)
+
+        # ----------------
+        # Responsive horizontal split
+        # ----------------
+        image_w = int(content_w * 0.58)
+        btn_w = content_w - image_w - h_gap
+
+        # Prevent buttons from becoming too narrow
+        min_btn_w = sc(260)
+        if btn_w < min_btn_w:
+            btn_w = min_btn_w
+            image_w = max(sc(260), content_w - btn_w - h_gap)
+
+        self.image_area = pygame.Rect(content_left, top_y, image_w, content_h)
+
+        bx = self.image_area.right + h_gap
+
+        # ----------------
+        # 3 stacked buttons filling vertical space
+        # ----------------
+        btn_gap = sc(24)
+        btn_h = max(sc(80), (content_h - 2 * btn_gap) // 3)
 
         self.button_rects = [
-            (bx, by + 0 * (bh + gap), bw, bh),
-            (bx, by + 1 * (bh + gap), bw, bh),
-            (bx, by + 2 * (bh + gap), bw, bh),
+            (bx, top_y + 0 * (btn_h + btn_gap), btn_w, btn_h),
+            (bx, top_y + 1 * (btn_h + btn_gap), btn_w, btn_h),
+            (bx, top_y + 2 * (btn_h + btn_gap), btn_w, btn_h),
         ]
 
-        # Menu buttons
-        btn_w, btn_h = sc(300), sc(120)
-        self.menu_play = pygame.Rect((w - btn_w) // 2, sc(330), btn_w, btn_h)
-        self.menu_exit = pygame.Rect((w - btn_w) // 2, sc(480), btn_w, btn_h)
-        self.finish_menu = pygame.Rect((w - btn_w) // 2, sc(500), btn_w, btn_h)
+        # ----------------
+        # Menu buttons (centered)
+        # ----------------
+        menu_btn_w, menu_btn_h = sc(300), sc(120)
+        self.menu_play = pygame.Rect((w - menu_btn_w) // 2, sc(330), menu_btn_w, menu_btn_h)
+        self.menu_exit = pygame.Rect((w - menu_btn_w) // 2, sc(480), menu_btn_w, menu_btn_h)
+        self.finish_menu = pygame.Rect((w - menu_btn_w) // 2, sc(500), menu_btn_w, menu_btn_h)
 
-        # Progress bar
-        self.progress_bar = pygame.Rect(sc(60), h - sc(60), w - sc(120), sc(24))
-
-        # Scale replay icons for current UI sizes
+        # ----------------
+        # Scale replay icons
+        # ----------------
         if self.replay_raw:
-            # prompt icon size (slightly smaller than prompt button rect)
             ps = max(1, int(self.prompt_replay.w * 0.70))
             self.prompt_replay_icon = scale_fit(self.replay_raw, ps, ps)
 
-            # button icon size matches Button icon_size (54*s)
             bs = max(1, int(54 * self.s * 0.80))
             self.btn_replay_icon = scale_fit(self.replay_raw, bs, bs)
         else:
@@ -568,8 +621,8 @@ def main():
     pygame.mixer.init()
 
     info = pygame.display.Info()
-    start_w = min(info.current_w, 1280)
-    start_h = min(info.current_h, 800)
+    start_w = min(info.current_w, 1024)
+    start_h = min(info.current_h, 600)
 
     screen = pygame.display.set_mode((start_w, start_h), pygame.RESIZABLE)
     pygame.display.set_caption("Game 2")
