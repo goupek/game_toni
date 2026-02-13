@@ -39,6 +39,8 @@ REPLAY_ICON_FILE = "replay.jpg"
 SND_GREAT = "great.mp3"
 SND_TRY_AGAIN = "try_again.mp3"
 
+TTS_DIR = os.path.join(BASE_DIR, "tts_out")
+
 # -----------------------------
 # PATH HELPERS
 # -----------------------------
@@ -47,6 +49,161 @@ def audio_path(filename):
 
 def image_path(filename):
     return os.path.join(IMG_DIR, filename)
+
+# -----------------------------
+# TTS AUDIO (wav clips in ./tts_out)
+# -----------------------------
+# Your provided dictionary: filename -> word/phrase
+TTS_FILES = {
+    "1_m.wav": "один",
+    "1_f.wav": "одна",
+    "1_n.wav": "одно",
+    "2_m.wav": "два",
+    "2_f.wav": "две",
+    "2_n.wav": "два",
+    "3.wav": "три",
+    "4.wav": "четыре",
+    "5.wav": "пять",
+
+    "dog_sg.wav": "собака",
+    "dog_pl.wav": "собаки",
+    "dog_gen_pl.wav": "собак",
+
+    "cat_sg.wav": "кошка",
+    "cat_pl.wav": "кошки",
+    "cat_gen_pl.wav": "кошек",
+
+    "car_sg.wav": "машина",
+    "car_pl.wav": "машины",
+    "car_gen_pl.wav": "машин",
+
+    "ball_sg.wav": "мяч",
+    "ball_pl.wav": "мячи",
+    "ball_gen_pl.wav": "мячей",
+
+    "red_m.wav": "красный",
+    "red_f.wav": "красная",
+    "red_n.wav": "красное",
+    "red_pl.wav": "красные",
+
+    "blue_m.wav": "синий",
+    "blue_f.wav": "синяя",
+    "blue_n.wav": "синее",
+    "blue_pl.wav": "синие",
+
+    "light_blue_m.wav": "голубой",
+    "light_blue_f.wav": "голубая",
+    "light_blue_n.wav": "голубое",
+    "light_blue_pl.wav": "голубые",
+
+    "green_m.wav": "зелёный",
+    "green_f.wav": "зелёная",
+    "green_n.wav": "зелёное",
+    "green_pl.wav": "зелёные",
+
+    "white_m.wav": "белый",
+    "white_f.wav": "белая",
+    "white_n.wav": "белое",
+    "white_pl.wav": "белые",
+
+    "yellow_m.wav": "жёлтый",
+    "yellow_f.wav": "жёлтая",
+    "yellow_n.wav": "жёлтое",
+    "yellow_pl.wav": "жёлтые",
+
+    "purple_m.wav": "фиолетовый",
+    "purple_f.wav": "фиолетовая",
+    "purple_n.wav": "фиолетовое",
+    "purple_pl.wav": "фиолетовые",
+
+    "pink_m.wav": "розовый",
+    "pink_f.wav": "розовая",
+    "pink_n.wav": "розовое",
+    "pink_pl.wav": "розовые",
+
+    "grey_m.wav": "серый",
+    "grey_f.wav": "серая",
+    "grey_n.wav": "серое",
+    "grey_pl.wav": "серые",
+
+    "brown_m.wav": "коричневый",
+    "brown_f.wav": "коричневая",
+    "brown_n.wav": "коричневое",
+    "brown_pl.wav": "коричневые",
+
+    "q_color.wav": "Какого цвета",
+    "q_count.wav": "Сколько",
+    "q_tail.wav": "на картинке?",
+}
+
+# Invert: word/phrase -> filename
+WORD_TO_WAV = {v: k for k, v in TTS_FILES.items()}
+
+def tts_path(filename):
+    return os.path.join(TTS_DIR, filename)
+
+class AudioBank:
+    def __init__(self):
+        self.cache = {}
+        self.ch = pygame.mixer.Channel(0)
+        self.queue = []
+
+    def _load(self, filename):
+        if not filename:
+            return None
+        if filename not in self.cache:
+            path = tts_path(filename)
+            if not os.path.exists(path):
+                print("[WARN] Missing TTS wav:", path)
+                return None
+            self.cache[filename] = pygame.mixer.Sound(path)
+        return self.cache[filename]
+
+    def play(self, filename):
+        snd = self._load(filename)
+        if not snd:
+            return
+        self.queue = []           # clear any sequence
+        self.ch.stop()
+        self.ch.play(snd)
+
+    def play_sequence(self, filenames):
+        self.queue = list(filenames)
+        self._play_next()
+
+    def _play_next(self):
+        if not self.queue:
+            return
+        fn = self.queue.pop(0)
+        snd = self._load(fn)
+        if snd:
+            self.ch.play(snd)
+
+    def update(self):
+        # Call this every frame from game loop
+        if not self.ch.get_busy() and self.queue:
+            self._play_next()
+
+def wav_for_word(word_or_phrase):
+    return WORD_TO_WAV.get(word_or_phrase)
+
+def noun_clip(noun_key, form_key):
+    # form_key: "sg" | "pl" | "gen_pl"
+    return "{}_{}.wav".format(noun_key, form_key)
+
+def question_clips(round_data):
+    # generator uses these prompt templates :contentReference[oaicite:1]{index=1}
+    noun_key = round_data["noun_key"]
+    count = round_data["count"]
+    qtype = round_data["qtype"]
+
+    if qtype == "count":
+        return ["q_count.wav", noun_clip(noun_key, "gen_pl"), "q_tail.wav"]
+
+    # qtype == "color"
+    form = "sg" if count == 1 else "pl"
+    return ["q_color.wav", noun_clip(noun_key, form), "q_tail.wav"]
+
 
 # -----------------------------
 # AUDIO (single channel, no overlap)
@@ -328,7 +485,8 @@ class StoryGame:
         self.buttons = []
         self.fit_image = None
         self.raw_image = None
-
+        
+        self.audio = AudioBank()
         self.load_round(0)
 
     def load_round(self, idx):
@@ -345,8 +503,19 @@ class StoryGame:
             self.buttons.append(Button(rect, label, show_replay=True))
 
         self.rescale_current_image()
+        self.audio.play_sequence(question_clips(rd))
+    
+    def speak_question(self):
+        rd = self.rounds[self.index]
+        self.audio.play_sequence(question_clips(rd))
 
-        # No prompt audio available from generator (keep UI replay button, but no sound)
+    def speak_option(self, label):
+        fn = wav_for_word(label)
+        if not fn:
+            print("[WARN] No wav for option:", label)
+            return
+        self.audio.play(fn)
+
 
     def rescale_current_image(self):
         rd = self.rounds[self.index]
@@ -435,6 +604,7 @@ class StoryGame:
         self.draw_progress()
 
     def on_choice(self, label, now_ms):
+        self.speak_option(label)
         correct = self.rounds[self.index]["correct"]
 
         self.locked = True
@@ -477,6 +647,7 @@ class StoryGame:
     def run(self):
         while True:
             now_ms = pygame.time.get_ticks()
+            self.audio.update()
 
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
@@ -494,8 +665,9 @@ class StoryGame:
                         pass
 
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                    # prompt replay button (visual only for now)
+                    # prompt replay button
                     if self.ui.prompt_replay.collidepoint(event.pos):
+                        self.speak_question()
                         continue
 
                     if not self.locked:
@@ -503,11 +675,12 @@ class StoryGame:
                         replayed = False
                         for b in self.buttons:
                             if b.hit_replay(event.pos):
+                                self.speak_option(b.label)
                                 replayed = True
                                 break
                         if replayed:
                             continue
-
+                        # normal answer click
                         for b in self.buttons:
                             if b.hit(event.pos):
                                 self.on_choice(b.label, now_ms)
