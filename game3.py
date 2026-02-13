@@ -234,13 +234,60 @@ class Item:
 # -----------------------
 # Game Logic
 # -----------------------
+
+def _x_overlap_ratio(a: Item, b: Item) -> float:
+    """How much the items overlap in X, as a fraction of the smaller width."""
+    inter = max(0, min(a.rect.right, b.rect.right) - max(a.rect.left, b.rect.left))
+    denom = max(1, min(a.rect.w, b.rect.w))
+    return inter / denom
+
+def _intersection_area(a: Item, b: Item) -> int:
+    x1 = max(a.rect.left, b.rect.left)
+    y1 = max(a.rect.top, b.rect.top)
+    x2 = min(a.rect.right, b.rect.right)
+    y2 = min(a.rect.bottom, b.rect.bottom)
+    if x2 <= x1 or y2 <= y1:
+        return 0
+    return (x2 - x1) * (y2 - y1)
+
+# NOTE: These checks are intentionally distance-invariant.
+# If something is "to the right" it stays correct no matter how far right it is.
+# We also allow slight overlaps (kid-friendly).
+
+MIN_X_OVERLAP_FRAC = 0.25   # for ON/UNDER
+
+def rel_on(a: Item, b: Item) -> bool:
+    return (a.rect.centery < b.rect.centery) and (_x_overlap_ratio(a, b) >= MIN_X_OVERLAP_FRAC)
+
+def rel_under(a: Item, b: Item) -> bool:
+    return (a.rect.centery > b.rect.centery) and (_x_overlap_ratio(a, b) >= MIN_X_OVERLAP_FRAC)
+
+def rel_left_of(a: Item, b: Item) -> bool:
+    return a.rect.centerx < b.rect.centerx
+
+def rel_right_of(a: Item, b: Item) -> bool:
+    return a.rect.centerx > b.rect.centerx
+
+def rel_inside(a: Item, b: Item) -> bool:
+    # Mostly-inside check: center is inside AND at least 60% of area overlaps with the container.
+    if not b.rect.collidepoint(a.rect.center):
+        return False
+    inter_area = _intersection_area(a, b)
+    a_area = max(1, a.rect.w * a.rect.h)
+    return (inter_area / a_area) >= 0.60
+
+def rel_between(a: Item, b1: Item, b2: Item) -> bool:
+    lo = min(b1.rect.centerx, b2.rect.centerx)
+    hi = max(b1.rect.centerx, b2.rect.centerx)
+    return lo <= a.rect.centerx <= hi
+
 REL_MAP = {
-    "on": lambda a, b: abs(a.rect.bottom - b.rect.top) <= TOL_ON and a.rect.centerx >= b.rect.left and a.rect.centerx <= b.rect.right and a.rect.centery < b.rect.centery,
-    "under": lambda a, b: abs(a.rect.top - b.rect.bottom) <= TOL_ON and a.rect.centerx >= b.rect.left and a.rect.centerx <= b.rect.right and a.rect.centery > b.rect.centery,
-    "left_of": lambda a, b: a.rect.right <= b.rect.left - MARGIN_SIDE,
-    "right_of": lambda a, b: a.rect.left >= b.rect.right + MARGIN_SIDE,
-    "inside": lambda a, b: b.rect.contains(a.rect.inflate(-TOL_INSIDE, -TOL_INSIDE)),
-    "between": lambda a, b1, b2: a.rect.centerx >= min(b1.rect.centerx, b2.rect.centerx) + TOL_BETWEEN and a.rect.centerx <= max(b1.rect.centerx, b2.rect.centerx) - TOL_BETWEEN
+    "on": rel_on,
+    "under": rel_under,
+    "left_of": rel_left_of,
+    "right_of": rel_right_of,
+    "inside": rel_inside,
+    "between": rel_between,
 }
 
 def instruction_text(constraints):
@@ -314,13 +361,20 @@ def main():
     
     # Speaker Button (Blue accent to be visible)
     btn_speaker = Button(0, 0, 50, 50, "", bg_color=BLUE_ACCENT, text_color=WHITE, icon_only=True)
-    
-    buttons = [btn_check, btn_reset, btn_next, btn_speaker]
+
+    # Restart button (used on the final score screen)
+    btn_restart = Button(V_WIDTH // 2 - 160, V_HEIGHT // 2 + 80, 320, 60, "Сыграть снова", bg_color=BLUE_ACCENT, text_color=WHITE)
+
+    buttons = [btn_check, btn_reset, btn_next, btn_speaker, btn_restart]
 
     ch_instr = pygame.mixer.Channel(0)
     ch_fb = pygame.mixer.Channel(1)
     
     idx = 0
+    score = 0
+    solved = [False] * len(SCENARIOS)  # level counted in score already?
+    game_over = False
+
     items = {}
     constraints = []
     text_instr = ""
@@ -330,14 +384,18 @@ def main():
     dragging = None
 
     def play_instruction_audio(index):
-        # Checks for "1.mp3", "01.mp3" in the audio folder
-        filenames = [f"{index+1}.mp3", f"{index+1:02d}.mp3"]
+        # Checks for "1.wav", "01.wav", "1.mp3", "01.mp3" in the audio folder
+        filenames = [
+            f"{index+1}.wav", f"{index+1:02d}.wav",
+            f"{index+1}.mp3", f"{index+1:02d}.mp3",
+        ]
         s = None
         for f in filenames:
             s = load_sound_debug(INSTR_DIR, f)
-            if s: break
-        
-        if s: 
+            if s:
+                break
+
+        if s:
             ch_instr.stop()
             ch_instr.play(s)
         else:
@@ -371,47 +429,80 @@ def main():
             if event.type == pygame.QUIT: running = False
             elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 
-                if btn_speaker.hit(mouse_game):
+                if btn_speaker.hit(mouse_game) and not game_over:
                     play_instruction_audio(idx)
 
-                elif btn_check.hit(mouse_game):
+                elif btn_check.hit(mouse_game) and not game_over:
+
                     ok = True
                     for c in constraints:
                         a = items[c["a"]]
                         if c["type"] == "between":
-                            if not REL_MAP["between"](a, items[c["b"][0]], items[c["b"][1]]): ok = False
+                            if not REL_MAP["between"](a, items[c["b"][0]], items[c["b"][1]]):
+                                ok = False
                         else:
-                            if not REL_MAP[c["type"]](a, items[c["b"]]): ok = False
+                            if not REL_MAP[c["type"]](a, items[c["b"]]):
+                                ok = False
+
                     if ok:
+                        # Count score only once per level
+                        if not solved[idx]:
+                            score += 1
+                            solved[idx] = True
+
                         feedback = "Отлично! Всё верно."
                         feedback_col = GREEN
                         # Try "correct.wav" or "correct.mp3"
                         s = load_sound_debug(FEEDBACK_DIR, "correct.wav")
-                        if not s: s = load_sound_debug(FEEDBACK_DIR, "correct.mp3")
-                        if s: ch_fb.play(s)
+                        if not s:
+                            s = load_sound_debug(FEEDBACK_DIR, "correct.mp3")
+                        if s:
+                            ch_fb.play(s)
                     else:
                         feedback = "Попробуйте ещё раз."
                         feedback_col = RED
                         # Try "incorrect.wav" or "incorrect.mp3"
                         s = load_sound_debug(FEEDBACK_DIR, "incorrect.wav")
-                        if not s: s = load_sound_debug(FEEDBACK_DIR, "incorrect.mp3")
-                        if s: ch_fb.play(s)
+                        if not s:
+                            s = load_sound_debug(FEEDBACK_DIR, "incorrect.mp3")
+                        if s:
+                            ch_fb.play(s)
+
                     fb_timer = time.time()
-                elif btn_reset.hit(mouse_game):
-                    for it in items.values(): it.reset()
+                elif btn_reset.hit(mouse_game) and not game_over:
+                    for it in items.values():
+                        it.reset()
                     feedback = ""
-                elif btn_next.hit(mouse_game):
-                    idx = (idx + 1) % len(SCENARIOS)
+
+                elif btn_next.hit(mouse_game) and not game_over:
+                    # Advance through levels; on the last level show the final score screen
+                    if idx >= len(SCENARIOS) - 1:
+                        game_over = True
+                        feedback = ""
+                        ch_instr.stop()
+                    else:
+                        idx += 1
+                        load_level(idx)
+
+                elif btn_restart.hit(mouse_game) and game_over:
+                    # Restart the whole game
+                    idx = 0
+                    score = 0
+                    solved = [False] * len(SCENARIOS)
+                    game_over = False
                     load_level(idx)
+
                 else:
-                    curr_items = list(items.values())
-                    for i in reversed(range(len(curr_items))):
-                        it = curr_items[i]
-                        if it.start_drag(mouse_game):
-                            dragging = it
-                            val = items.pop(it.name)
-                            items[it.name] = val
-                            break
+                    # Drag only during gameplay
+                    if not game_over:
+                        curr_items = list(items.values())
+                        for i in reversed(range(len(curr_items))):
+                            it = curr_items[i]
+                            if it.start_drag(mouse_game):
+                                dragging = it
+                                val = items.pop(it.name)
+                                items[it.name] = val
+                                break
             elif event.type == pygame.MOUSEBUTTONUP:
                 dragging = None
             elif event.type == pygame.MOUSEMOTION and dragging:
@@ -424,35 +515,69 @@ def main():
         pygame.draw.rect(canvas, HEADER_BG, (0, 0, V_WIDTH, HEADER_H))
         pygame.draw.line(canvas, (220, 225, 230), (0, HEADER_H), (V_WIDTH, HEADER_H), 2)
         
-        title = font_xl.render(f"Пример {idx + 1} / {len(SCENARIOS)}", True, TEXT_COLOR)
-        canvas.blit(title, (30, 35))
-        
-        for b in [btn_check, btn_reset, btn_next]:
-            b.draw(canvas, font_md)
+        # Score (left) + example counter (center)
+        score_surf = font_lg.render(f"Счёт: {score}/{len(SCENARIOS)}", True, TEXT_COLOR)
+        canvas.blit(score_surf, (30, 45))
 
-        instr_rect_area = pygame.Rect(100, 95, V_WIDTH - 200, 60)
-        text_bounds = draw_text_wrapped(canvas, text_instr, font_lg, MUTED_COLOR, instr_rect_area)
+        ex_surf = font_xl.render(f"{idx + 1}/{len(SCENARIOS)}", True, TEXT_COLOR)
+        canvas.blit(ex_surf, ex_surf.get_rect(center=(V_WIDTH // 2, 60)))
 
-        # Update speaker button pos to be left of text
-        btn_speaker.rect.x = text_bounds.x - 60
-        btn_speaker.rect.y = text_bounds.centery - 25
-        btn_speaker.draw(canvas, font_md)
+        if not game_over:
+            for b in [btn_check, btn_reset, btn_next]:
+                b.draw(canvas, font_md)
 
-        hint_surf = font_sm.render("Перетащите объекты, следуя инструкции.", True, (160, 170, 180))
-        canvas.blit(hint_surf, (V_WIDTH - hint_surf.get_width() - 20, V_HEIGHT - 30))
+        if not game_over:
+            instr_rect_area = pygame.Rect(100, 95, V_WIDTH - 200, 60)
+            text_bounds = draw_text_wrapped(canvas, text_instr, font_lg, MUTED_COLOR, instr_rect_area)
 
-        if feedback:
+            # Update speaker button pos to be left of text
+            btn_speaker.rect.x = text_bounds.x - 60
+            btn_speaker.rect.y = text_bounds.centery - 25
+            btn_speaker.draw(canvas, font_md)
+
+        if not game_over:
+            hint_surf = font_sm.render("Перетащите объекты, следуя инструкции.", True, (160, 170, 180))
+            canvas.blit(hint_surf, (V_WIDTH - hint_surf.get_width() - 20, V_HEIGHT - 30))
+
+        # Final score overlay
+        if game_over:
+            overlay = pygame.Surface((V_WIDTH, V_HEIGHT), pygame.SRCALPHA)
+            overlay.fill((0, 0, 0, 120))
+            canvas.blit(overlay, (0, 0))
+
+            panel = pygame.Rect(V_WIDTH // 2 - 360, V_HEIGHT // 2 - 160, 720, 320)
+            panel_surf = pygame.Surface((panel.width, panel.height), pygame.SRCALPHA)
+            panel_surf.fill((255, 255, 255, 245))
+            canvas.blit(panel_surf, panel.topleft)
+            pygame.draw.rect(canvas, (200, 200, 200), panel, 2, border_radius=18)
+
+            done_title = font_xl.render("Игра окончена!", True, TEXT_COLOR)
+            canvas.blit(done_title, done_title.get_rect(center=(V_WIDTH // 2, panel.top + 70)))
+
+            score_big = font_xl.render(f"Ваш счёт: {score} / {len(SCENARIOS)}", True, BLUE_ACCENT)
+            canvas.blit(score_big, score_big.get_rect(center=(V_WIDTH // 2, panel.top + 140)))
+
+            tip = font_md.render("Нажмите «Сыграть снова», чтобы начать заново.", True, MUTED_COLOR)
+            canvas.blit(tip, tip.get_rect(center=(V_WIDTH // 2, panel.top + 205)))
+
+            btn_restart.draw(canvas, font_md)
+
+        # Draw items only during gameplay
+        if not game_over:
+            for it in items.values():
+                it.draw(canvas)
+
+
+        # Feedback (near bottom, drawn AFTER objects so it stays on top)
+        if feedback and not game_over:
             fb_surf = font_xl.render(feedback, True, feedback_col)
-            fb_rect = fb_surf.get_rect(center=(V_WIDTH // 2, V_HEIGHT - 100))
+            fb_rect = fb_surf.get_rect(center=(V_WIDTH // 2, V_HEIGHT - 95))
             bg_rect = fb_rect.inflate(40, 20)
             s = pygame.Surface((bg_rect.width, bg_rect.height), pygame.SRCALPHA)
             s.fill((255, 255, 255, 230))
             canvas.blit(s, bg_rect.topleft)
             pygame.draw.rect(canvas, (200, 200, 200), bg_rect, 2, border_radius=15)
             canvas.blit(fb_surf, fb_rect.topleft)
-
-        for it in items.values():
-            it.draw(canvas)
 
         scaled_surf = pygame.transform.smoothscale(canvas, (new_w, new_h))
         if offset_x > 0 or offset_y > 0: screen.fill((30, 30, 30)) 
