@@ -179,7 +179,7 @@ class ImprovedRussianGame:
         # Ollama LLM + embeddings
         self.ollama_url = "http://localhost:11434"
         self.model = "qwen2.5:1.7b"
-        self.embed_model = "bge-m3"   # was "nomic-embed-text"
+        self.embed_model = "bge-m3"   # multilingual (Russian + English cross-lingual)
         self.ai_enabled = self.check_ai()
 
         # Embedding cache (persisted to disk alongside the script)
@@ -200,6 +200,19 @@ class ImprovedRussianGame:
 
         # Track difficulty of the current question (updated each generate_question)
         self._current_difficulty: float = 0.5
+
+        # ── A1 / A2 level tracking ────────────────────────────────────────────
+        # We start purely in A1, then open A2 once A1 is mastered.
+        self.level_stats: Dict[str, Dict[str, int]] = {
+            "A1": {"asked": 0, "correct": 0},
+            "A2": {"asked": 0, "correct": 0},
+        }
+        # Minimum A1 questions before we start mixing in A2
+        self.a1_gate_questions = 8
+        # A1 accuracy required to unlock A2 questions
+        self.a1_gate_accuracy = 0.70
+        # Current question's word level
+        self._current_word_level: str = "A1"
 
         self.correct_answer = ""
         self.current_question: Dict[str, Any] = {}
@@ -283,8 +296,9 @@ class ImprovedRussianGame:
                 ru = (w.get("ru") or "").strip()
                 en = (w.get("en") or "").strip()
                 pos = (w.get("pos") or "").strip()
+                lvl = (w.get("level") or "A1").strip().upper()
                 if ru and en:
-                    norm.append({"ru": ru, "en": en, "pos": pos})
+                    norm.append({"ru": ru, "en": en, "pos": pos, "level": lvl})
             if len(norm) < 4:
                 continue
             out.append({
@@ -383,6 +397,13 @@ class ImprovedRussianGame:
             bg="#2C3E50", fg="#F39C12",
         )
         self.q_label.pack()
+
+        # Live A1/A2 badge
+        self.level_badge = tk.Label(
+            right, text="Уровень: ?", font=("Arial", 13, "bold"),
+            bg="#2C3E50", fg="#1ABC9C",
+        )
+        self.level_badge.pack()
 
         self.header = tk.Frame(self.root, bg=self.current_topic["color"], height=100)
         self.header.pack(fill=tk.X)
@@ -520,6 +541,61 @@ class ImprovedRussianGame:
         lvl = int(round(1 + self.skill * 9))
         return max(1, min(10, lvl))
 
+    # ── A1 / A2 level helpers ─────────────────────────────────────────────────
+
+    def _level_accuracy(self, level: str) -> Optional[float]:
+        s = self.level_stats.get(level, {})
+        asked = s.get("asked", 0)
+        if asked == 0:
+            return None
+        return s["correct"] / asked
+
+    def _a2_unlocked(self) -> bool:
+        """Return True once the kid has demonstrated enough A1 mastery."""
+        s = self.level_stats["A1"]
+        if s["asked"] < self.a1_gate_questions:
+            return False
+        acc = self._level_accuracy("A1")
+        return acc is not None and acc >= self.a1_gate_accuracy
+
+    def _cefr_verdict(self) -> str:
+        """
+        Produce a human-readable A1/A2 verdict based on per-level accuracy.
+        """
+        a1_acc = self._level_accuracy("A1")
+        a2_acc = self._level_accuracy("A2")
+        a1_asked = self.level_stats["A1"]["asked"]
+        a2_asked = self.level_stats["A2"]["asked"]
+
+        if a1_asked == 0:
+            return "Недостаточно данных"
+
+        a1_pct = int((a1_acc or 0) * 100)
+        a2_pct = int((a2_acc or 0) * 100) if a2_acc is not None else None
+
+        if a1_pct < 50:
+            verdict = "Ниже A1 — нужна дополнительная практика базовых слов"
+        elif a1_pct < 70:
+            verdict = "Начальный A1 — базовые слова частично усвоены"
+        elif a2_asked < 4:
+            verdict = f"Уверенный A1 ({a1_pct}%) — A2 слова ещё не проверялись"
+        elif a2_pct is not None and a2_pct >= 75:
+            verdict = f"Уверенный A2 ({a2_pct}%) — отличный результат!"
+        elif a2_pct is not None and a2_pct >= 50:
+            verdict = f"Переходный A1→A2 — A1: {a1_pct}%, A2: {a2_pct}%"
+        else:
+            verdict = f"Уверенный A1 ({a1_pct}%) — A2 пока трудно ({a2_pct}%)"
+
+        return verdict
+
+    def _live_level_text(self) -> str:
+        a1_acc = self._level_accuracy("A1")
+        a2_acc = self._level_accuracy("A2")
+        a1_str = "—" if a1_acc is None else f"{int(a1_acc*100)}%"
+        a2_str = "—" if a2_acc is None else f"{int(a2_acc*100)}%"
+        unlocked = "✓" if self._a2_unlocked() else "🔒"
+        return f"A1: {a1_str}  |  A2 {unlocked}: {a2_str}"
+
     def _should_stop(self) -> bool:
         if self._asked_total >= self.max_questions_hard_stop:
             return True
@@ -539,28 +615,39 @@ class ImprovedRussianGame:
     def _finish_and_show_result(self, reason: str = ""):
         lvl = self._estimated_level_1_to_10()
         acc = self._recent_accuracy(10)
-        acc_txt = "—" if acc is None else f"{acc:.2f}"
+        acc_txt = "—" if acc is None else f"{acc:.0%}"
 
-        # weighted accuracy: weight correct answers by their difficulty
-        weighted_score = 0.0
-        weight_total = 0.0
+        a1_s = self.level_stats["A1"]
+        a2_s = self.level_stats["A2"]
+        a1_acc = self._level_accuracy("A1")
+        a2_acc = self._level_accuracy("A2")
+        a1_txt = "—" if a1_acc is None else f"{a1_acc:.0%}  ({a1_s['correct']}/{a1_s['asked']} правильно)"
+        a2_txt = "—" if a2_acc is None else f"{a2_acc:.0%}  ({a2_s['correct']}/{a2_s['asked']} правильно)"
+
+        # weighted accuracy
+        weighted_score = weighted_total = 0.0
         for h in self.history:
             d = h.get("difficulty", 0.5)
-            weight_total += d + 0.5
+            weighted_total += d + 0.5
             if h["ok"]:
                 weighted_score += d + 0.5
-        weighted_acc = (weighted_score / weight_total) if weight_total else 0
+        w_acc = (weighted_score / weighted_total) if weighted_total else 0
+
+        verdict = self._cefr_verdict()
 
         msg = (
             "🏁 Диагностика завершена!\n\n"
-            f"Оценка уровня: {lvl}/10\n"
-            f"Skill: {self.skill:.2f}\n"
-            f"Точность (последние 10): {acc_txt}\n"
-            f"Взвешенная точность (по сложности): {weighted_acc:.2f}\n"
-            f"Вопросов: {self._asked_total}\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"  Уровень A1:  {a1_txt}\n"
+            f"  Уровень A2:  {a2_txt}\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"  Вердикт: {verdict}\n\n"
+            f"  Общая точность (посл. 10): {acc_txt}\n"
+            f"  Взвешенная (по сложности): {w_acc:.0%}\n"
+            f"  Вопросов всего: {self._asked_total}\n"
         )
         if reason:
-            msg += f"\nПричина: {reason}\n"
+            msg += f"\n  Причина завершения: {reason}\n"
         msg += "\nМожно закрывать окно."
 
         messagebox.showinfo("Результат", msg)
@@ -575,9 +662,11 @@ class ImprovedRussianGame:
         self.seen_question_keys.add(self._q_key(direction, shown))
         self.seen_question_keys.add(f"{direction}|correct|{correct.strip().lower()}")
 
-    def _available_words_for_topic(self, topic: Dict[str, Any], direction: str) -> List[Dict[str, str]]:
+    def _available_words_for_topic(self, topic: Dict[str, Any], direction: str, word_level: Optional[str] = None) -> List[Dict[str, str]]:
         out = []
         for w in topic["words"]:
+            if word_level and w.get("level", "A1") != word_level:
+                continue
             shown = w["ru"] if direction == "ru_to_en" else w["en"]
             if self._q_key(direction, shown) not in self.seen_question_keys:
                 out.append(w)
@@ -694,15 +783,19 @@ class ImprovedRussianGame:
 
     # ── Pools ─────────────────────────────────────────────────────────────────
 
-    def _all_en_pool(self, mix_topics: bool) -> List[str]:
-        if not mix_topics:
-            return [w["en"] for w in self.current_topic["words"]]
-        return [w["en"] for t in self.topics for w in t["words"]]
+    def _all_en_pool(self, mix_topics: bool, word_level: Optional[str] = None) -> List[str]:
+        topics = self.topics if mix_topics else [self.current_topic]
+        return [
+            w["en"] for t in topics for w in t["words"]
+            if word_level is None or w.get("level", "A1") == word_level
+        ]
 
-    def _all_ru_pool(self, mix_topics: bool) -> List[str]:
-        if not mix_topics:
-            return [w["ru"] for w in self.current_topic["words"]]
-        return [w["ru"] for t in self.topics for w in t["words"]]
+    def _all_ru_pool(self, mix_topics: bool, word_level: Optional[str] = None) -> List[str]:
+        topics = self.topics if mix_topics else [self.current_topic]
+        return [
+            w["ru"] for t in topics for w in t["words"]
+            if word_level is None or w.get("level", "A1") == word_level
+        ]
 
     # ── LLM question selection ────────────────────────────────────────────────
 
@@ -723,15 +816,29 @@ class ImprovedRussianGame:
         except Exception:
             return None
 
-    def _candidate_words_for_topic(self, topic: Dict[str, Any], direction: str) -> List[Dict[str, str]]:
-        available = self._available_words_for_topic(topic, direction)
+    def _target_word_level(self) -> str:
+        """
+        Decide whether the next question should use an A1 or A2 word.
+        A2 is only used once the kid has passed the A1 gate.
+        Even after unlocking A2, we keep ~40% A1 questions for reinforcement.
+        """
+        if not self._a2_unlocked():
+            return "A1"
+        # Once A2 is unlocked: 40% A1 (reinforcement) / 60% A2 (new challenge)
+        return "A2" if random.random() < 0.60 else "A1"
+
+    def _candidate_words_for_topic(self, topic: Dict[str, Any], direction: str, word_level: str = "A1") -> List[Dict[str, str]]:
+        available = self._available_words_for_topic(topic, direction, word_level=word_level)
+        if not available:
+            # fall back to any unseen word in this topic regardless of level
+            available = self._available_words_for_topic(topic, direction)
         if not available:
             return []
         target = 4 + int(self.skill * 6)
         scored = []
         for w in available:
             score = abs(len(w["ru"]) - target)
-            scored.append((score, {"ru": w["ru"], "en": w["en"], "pos": w.get("pos", "")}))
+            scored.append((score, {"ru": w["ru"], "en": w["en"], "pos": w.get("pos", ""), "level": w.get("level", "A1")}))
         scored.sort(key=lambda x: x[0])
         return [x[1] for x in scored[:18]]
 
@@ -740,14 +847,16 @@ class ImprovedRussianGame:
         dir_try = ["ru_to_en", "en_to_ru"]
         random.shuffle(dir_try)
         mix = self.skill >= 0.55
+        word_level = self._target_word_level()
 
         for direction in dir_try:
-            candidates = self._candidate_words_for_topic(topic, direction)
+            candidates = self._candidate_words_for_topic(topic, direction, word_level=word_level)
             if len(candidates) < 4:
                 continue
 
             acc = self._recent_accuracy(10)
             acc_txt = "null" if acc is None else f"{acc:.2f}"
+            a2_unlocked = self._a2_unlocked()
 
             prompt = f"""
 You are a tester to quickly IDENTIFY a toddler's Russian level.
@@ -758,9 +867,12 @@ Context:
 - Estimated skill (0..1): {self.skill:.2f}
 - Recent accuracy (last 10): {acc_txt}
 - Questions asked so far: {self._asked_total}
+- Target word level for this question: {word_level}
+- A2 unlocked: {a2_unlocked}
 
 Hard rule:
 - DO NOT repeat already asked words. You MUST choose correct word from candidates provided.
+- Prefer words matching level "{word_level}".
 
 Rules:
 - Output VALID JSON ONLY. No extra text.
@@ -797,19 +909,29 @@ If direction == "en_to_ru": shown is English word, correct is Russian.
             if self._q_key(direction, shown) in self.seen_question_keys:
                 continue
 
+            # Resolve the actual word level from DB (LLM may have picked any candidate)
+            actual_level = word_level
+            for c in candidates:
+                shown_field = c["ru"] if direction == "ru_to_en" else c["en"]
+                if shown_field.strip().lower() == shown.strip().lower():
+                    actual_level = c.get("level", word_level)
+                    break
+
             pool = (self._all_en_pool(mix) if direction == "ru_to_en" else self._all_ru_pool(mix))
             choices, difficulty = self._build_choices_semantic(correct, pool, n=4)
 
             self.correct_answer = correct
             self._current_difficulty = difficulty
+            self._current_word_level = actual_level
             self.current_question = {
                 "prompt": prompt_ru,
                 "shown": shown,
                 "direction": direction,
                 "topic_id": topic["id"],
                 "difficulty": difficulty,
+                "word_level": actual_level,
             }
-            self._display_question(prompt_ru, shown, choices, difficulty)
+            self._display_question(prompt_ru, shown, choices, difficulty, actual_level)
             self._mark_seen(direction, shown, correct)
             return True
 
@@ -822,12 +944,21 @@ If direction == "en_to_ru": shown is English word, correct is Russian.
             return "ru_to_en"
         return random.choice(["ru_to_en", "en_to_ru"])
 
-    def _pick_unseen_word_any_topic(self, direction: str) -> Optional[Tuple[Dict[str, Any], Dict[str, str]]]:
-        candidates = self._available_words_for_topic(self.current_topic, direction)
+    def _pick_unseen_word_any_topic(self, direction: str, word_level: str = "A1") -> Optional[Tuple[Dict[str, Any], Dict[str, str]]]:
+        # Try current topic first with requested level
+        candidates = self._available_words_for_topic(self.current_topic, direction, word_level=word_level)
         if candidates:
             return self.current_topic, random.choice(candidates)
+
+        # Try other topics with requested level
         topics_shuffled = self.topics[:]
         random.shuffle(topics_shuffled)
+        for t in topics_shuffled:
+            candidates = self._available_words_for_topic(t, direction, word_level=word_level)
+            if candidates:
+                return t, random.choice(candidates)
+
+        # Fall back: any unseen word regardless of level
         for t in topics_shuffled:
             candidates = self._available_words_for_topic(t, direction)
             if candidates:
@@ -837,14 +968,17 @@ If direction == "en_to_ru": shown is English word, correct is Russian.
     def _show_db_question(self) -> bool:
         direction = self._direction_fallback()
         mix = self.skill >= 0.55
+        word_level = self._target_word_level()
 
-        picked = self._pick_unseen_word_any_topic(direction)
+        picked = self._pick_unseen_word_any_topic(direction, word_level=word_level)
         if not picked:
             return False
 
         topic, w = picked
         if topic["id"] != self.current_topic["id"]:
             self._set_current_topic(topic)
+
+        actual_level = w.get("level", "A1")
 
         if direction == "ru_to_en":
             prompt = "Что это значит по-английски?"
@@ -860,30 +994,38 @@ If direction == "en_to_ru": shown is English word, correct is Russian.
         choices, difficulty = self._build_choices_semantic(correct, pool, n=4)
         self.correct_answer = correct
         self._current_difficulty = difficulty
+        self._current_word_level = actual_level
         self.current_question = {
             "prompt": prompt,
             "shown": shown,
             "direction": direction,
             "topic_id": self.current_topic["id"],
             "difficulty": difficulty,
+            "word_level": actual_level,
         }
-        self._display_question(prompt, shown, choices, difficulty)
+        self._display_question(prompt, shown, choices, difficulty, actual_level)
         self._mark_seen(direction, shown, correct)
         return True
 
     # ── Display / flow ────────────────────────────────────────────────────────
 
-    def _display_question(self, question: str, shown_text: str, choices: List[str], difficulty: float = 0.5):
+    def _display_question(self, question: str, shown_text: str, choices: List[str], difficulty: float = 0.5, word_level: str = "A1"):
         self._set_emoji_image(self.current_topic.get("icon", FALLBACK_TOPIC_ICON), size=90)
         self.question_label.config(text=question)
         self.word_label.config(text=shown_text)
 
-        lvl = self._estimated_level_1_to_10()
         acc = self._recent_accuracy(10)
-        acc_txt = "—" if acc is None else f"{acc:.2f}"
+        acc_txt = "—" if acc is None else f"{acc:.0%}"
+
+        # Show word level tag next to status
+        level_color = "#27AE60" if word_level == "A1" else "#E67E22"
         self.status_label.config(
-            text=f"Оценка: {lvl}/10 | skill={self.skill:.2f} | acc10={acc_txt}"
+            text=f"Слово уровня {word_level}  |  skill={self.skill:.2f}  |  acc={acc_txt}",
+            fg=level_color,
         )
+
+        # Update live A1/A2 badge
+        self.level_badge.config(text=self._live_level_text())
 
         self.root.after(50, lambda: self._draw_difficulty_bar(difficulty))
 
@@ -933,6 +1075,7 @@ If direction == "en_to_ru": shown is English word, correct is Russian.
 
         is_correct = answer.lower().strip() == self.correct_answer.lower().strip()
         difficulty = self._current_difficulty
+        word_level = self._current_word_level
 
         if is_correct:
             for btn in self.choice_buttons:
@@ -950,12 +1093,18 @@ If direction == "en_to_ru": shown is English word, correct is Russian.
                 text=f"❌ Неправильно: {self.correct_answer}", fg="#E74C3C"
             )
 
+        # ── Per-level stats ───────────────────────────────────────────────────
+        if word_level in self.level_stats:
+            self.level_stats[word_level]["asked"] += 1
+            if is_correct:
+                self.level_stats[word_level]["correct"] += 1
+
         # ── Difficulty-weighted skill update ──────────────────────────────────
         delta = _skill_delta(is_correct, difficulty)
         self.skill = max(0.0, min(1.0, self.skill + delta))
 
         self.skill_history.append(self.skill)
-        self.skill_history = self.skill_history[-self.max_history :]
+        self.skill_history = self.skill_history[-self.max_history:]
 
         self.history.append({
             "ok": bool(is_correct),
@@ -964,8 +1113,9 @@ If direction == "en_to_ru": shown is English word, correct is Russian.
             "shown": self.current_question.get("shown"),
             "correct": self.correct_answer,
             "difficulty": difficulty,
+            "word_level": word_level,
         })
-        self.history = self.history[-self.max_history :]
+        self.history = self.history[-self.max_history:]
 
         self.root.after(self.auto_advance_ms, self.generate_question)
 
@@ -978,9 +1128,11 @@ def main():
     root = tk.Tk()
     messagebox.showinfo(
         "Старт",
-        "Это тест для определения уровня.\n"
-        "Он автоматически завершится, когда уровень станет понятен.\n"
-        "Вопросы не повторяются.\n\n"
+        "Это тест для определения уровня A1 / A2.\n\n"
+        "• Сначала вопросы по словам уровня A1.\n"
+        "• Когда A1 будет освоен — добавятся слова A2.\n"
+        "• Вопросы не повторяются.\n"
+        "• Тест завершится автоматически.\n\n"
         "Примечание: первые вопросы могут загружаться чуть дольше,\n"
         "пока система кэширует смысловые векторы слов.",
     )
