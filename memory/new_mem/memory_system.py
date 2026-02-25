@@ -15,51 +15,68 @@ from dataclasses import dataclass, field
 # Configuration for Embeddings (Optimized for Jetson)
 from config import conf
 
-# Lazy load embedding model to save memory
-import threading
+# Check if torch is available separately from FAISS
+_torch_available = False
+try:
+    import torch
+    _torch_available = True
+except ImportError:
+    pass
 
 _embedding_model = None
 _embedding_device = None
 _embedding_lock = threading.Lock()
 
+# Sentinel: distinguishes "not yet loaded" (None) from "failed to load" (_LOAD_FAILED).
+# Without this, every call to get_embedding() retries and prints the warning again.
+_LOAD_FAILED = object()
+
+
 def get_embedding_model():
-    """Lazy load sentence-transformer model (thread-safe)"""
+    """Lazy load sentence-transformer model (thread-safe, loads at most once)."""
     global _embedding_model, _embedding_device
 
-    if _embedding_model is not None:
+    # Already loaded successfully
+    if _embedding_model is not None and _embedding_model is not _LOAD_FAILED:
         return _embedding_model
 
+    # Already failed — don't retry or spam warnings
+    if _embedding_model is _LOAD_FAILED:
+        return None
+
     with _embedding_lock:
-        # Double-check after acquiring lock
-        if _embedding_model is None:
-            try:
-                from sentence_transformers import SentenceTransformer
-                # torch is already imported at module level (before faiss)
+        # Re-check inside lock (another thread may have loaded/failed while we waited)
+        if _embedding_model is not None:
+            return _embedding_model if _embedding_model is not _LOAD_FAILED else None
 
-                # Determine device
-                _embedding_device = conf.EMBEDDING_DEVICE if torch.cuda.is_available() else "cpu"
+        try:
+            from sentence_transformers import SentenceTransformer
 
-                print(f"🔧 Loading embedding model: {conf.EMBEDDING_MODEL} on {_embedding_device}...")
-                _embedding_model = SentenceTransformer(
-                    conf.EMBEDDING_MODEL,
-                    device=_embedding_device
-                )
+            # Determine device (fall back to CPU if torch is not available)
+            _embedding_device = conf.EMBEDDING_DEVICE if (_torch_available and torch.cuda.is_available()) else "cpu"
 
-                # Optimize for inference
-                if _embedding_device == "cuda":
-                    _embedding_model.half()  # Use FP16 for GPU efficiency
+            print(f"🔧 Loading embedding model: {conf.EMBEDDING_MODEL} on {_embedding_device}...")
+            _embedding_model = SentenceTransformer(
+                conf.EMBEDDING_MODEL,
+                device=_embedding_device
+            )
 
-                print(f"✅ Embedding model loaded")
+            # Optimize for inference on GPU
+            if _embedding_device == "cuda" and _torch_available:
+                _embedding_model.half()  # FP16 for GPU efficiency
 
-            except ImportError:
-                print("⚠️ sentence-transformers not installed. Embeddings disabled.")
-                print("   Install with: pip install sentence-transformers")
-                return None
-            except Exception as e:
-                print(f"⚠️ Failed to load embedding model: {e}")
-                return None
+            print(f"✅ Embedding model loaded")
 
-    return _embedding_model
+        except ImportError:
+            print("⚠️ sentence-transformers not installed. Embeddings disabled.")
+            print("   Install with: pip install sentence-transformers")
+            _embedding_model = _LOAD_FAILED
+        except Exception as e:
+            print(f"⚠️ Failed to load embedding model: {e}")
+            print("   Fix: pip install 'pyarrow<14.0' or pip install transformers --upgrade")
+            _embedding_model = _LOAD_FAILED
+
+    return _embedding_model if _embedding_model is not _LOAD_FAILED else None
 
 def get_embedding(text: str) -> Optional[bytes]:
     """
@@ -102,9 +119,8 @@ def get_embedding(text: str) -> Optional[bytes]:
 
 _faiss_available = False
 try:
-    # IMPORTANT: Import torch BEFORE faiss to avoid OpenMP segfault on macOS
-    # This is a known compatibility issue between PyTorch and FAISS
-    import torch
+    # IMPORTANT: torch must be imported before faiss to avoid OpenMP segfault on macOS.
+    # torch is already imported at module level; this block only imports faiss.
     import faiss
     _faiss_available = True
 except ImportError:
@@ -349,8 +365,24 @@ class Memory:
         if not self.blocks:
             if not self._load_from_db():
                 self.blocks = [
-                    Block("persona", "I am WALL-E, a robot companion.", 2000, "My identity and capabilities."),
-                    Block("human", "The human is my operator.", 2000, "User profile and preferences."),
+                    Block(
+                        "persona",
+                        "I am Jhony (short for Zhanibek), a kind and encouraging Russian teacher for young children.",
+                        2000,
+                        "My identity as a Russian language teacher."
+                    ),
+                    Block(
+                        "human",
+                        "Child's name: unknown.",
+                        2000,
+                        "Everything known about the child: name, interests, pets, family. Fill this in as you learn."
+                    ),
+                    Block(
+                        "learned_words",
+                        "",
+                        2000,
+                        "Russian words the child has successfully learned. One per line: 'word (english)'."
+                    ),
                     Block("system", "System initialized.", 1000, "System status.", read_only=True)
                 ]
                 self.save()
