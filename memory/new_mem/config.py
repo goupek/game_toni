@@ -16,7 +16,10 @@ class Config:
 
     # --- Memory Settings ---
     MAX_CONTEXT_MESSAGES: int = 10  # Rolling context window
-    USE_SEMANTIC_SEARCH: bool = True  # Enable with lightweight embeddings
+    # Semantic search requires sentence-transformers + compatible pyarrow/datasets stack.
+    # Set to False (default) to use fast text search with no ML dependencies.
+    # Set to True only after verifying: pip install sentence-transformers datasets>=2.20.0 tf-keras
+    USE_SEMANTIC_SEARCH: bool = False
     RECALL_MEMORY_LIMIT: int = 40     # Compress to archival after this limit
 
     # --- FAISS Settings (Fast Vector Search) ---

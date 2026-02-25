@@ -46,12 +46,13 @@ class TestCoreMemory(unittest.TestCase):
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     def test_default_blocks_created(self):
-        """Test that default blocks (persona, human, system) are created"""
-        self.assertEqual(len(self.memory.blocks), 3)
+        """Test that default blocks (persona, human, learned_words, system) are created"""
         labels = [b.label for b in self.memory.blocks]
         self.assertIn("persona", labels)
         self.assertIn("human", labels)
+        self.assertIn("learned_words", labels)
         self.assertIn("system", labels)
+        self.assertGreaterEqual(len(self.memory.blocks), 4)
 
     def test_get_block(self):
         """Test retrieving a specific block"""
@@ -122,6 +123,7 @@ class TestCoreMemory(unittest.TestCase):
         self.assertIn("</memory_blocks>", compiled)
         self.assertIn("<persona>", compiled)
         self.assertIn("<human>", compiled)
+        self.assertIn("<learned_words>", compiled)
 
     def test_metadata_tracking(self):
         """Test that metadata (created_at, last_modified) is tracked"""

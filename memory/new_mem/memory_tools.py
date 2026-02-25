@@ -1,10 +1,14 @@
 """
 Jhony (Zhanibek) Memory Tools
 Simplified for toddler SLA (Second Language Acquisition) and 1-2B LLMs.
+
+send_message is intentionally NOT included here — it lives in communication_tools.py
+so that the tool-routing logic in jhony_enhanced.py stays clean.
 """
 from typing import Dict, List, Any
 from memory_system import Memory, RecallMemory, ArchivalMemory
 from base_executor import BaseToolExecutor
+
 
 def get_memory_tools() -> List[Dict]:
     return [
@@ -12,14 +16,43 @@ def get_memory_tools() -> List[Dict]:
             "type": "function",
             "function": {
                 "name": "save_child_info",
-                "description": "Save important info about the child (interests, name, family) to persona memory.",
+                "description": (
+                    "Save NEW information about the child (interests, name, family members) "
+                    "to memory. Use this the first time you learn something about the child."
+                ),
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "label": {"type": "string", "enum": ["human"]},
-                        "content": {"type": "string", "description": "e.g., 'Child loves blue trucks' or 'Has a cat named Barsik'"}
+                        "content": {
+                            "type": "string",
+                            "description": "e.g. 'Child loves blue trucks' or 'Has a cat named Barsik'"
+                        }
                     },
-                    "required": ["label", "content"]
+                    "required": ["content"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "update_child_info",
+                "description": (
+                    "Correct or update previously saved information about the child. "
+                    "Use this when something has changed or was wrong before."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "old_content": {
+                            "type": "string",
+                            "description": "The exact text currently stored that needs to be changed"
+                        },
+                        "new_content": {
+                            "type": "string",
+                            "description": "The corrected or updated text to replace it with"
+                        }
+                    },
+                    "required": ["old_content", "new_content"]
                 }
             }
         },
@@ -27,14 +60,23 @@ def get_memory_tools() -> List[Dict]:
             "type": "function",
             "function": {
                 "name": "record_learned_word",
-                "description": "Save a Russian word the child successfully identified or learned.",
+                "description": (
+                    "Save a Russian word the child successfully identified or repeated. "
+                    "Call this after the child shows they understood a word."
+                ),
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "category": {"type": "string", "enum": ["vocabulary", "grammar"]},
-                        "content": {"type": "string", "description": "The word and context, e.g., 'Yabloko (Apple) - Level 1 success'"}
+                        "russian_word": {
+                            "type": "string",
+                            "description": "The Russian word in Cyrillic, e.g. 'яблоко'"
+                        },
+                        "english_word": {
+                            "type": "string",
+                            "description": "The English translation, e.g. 'apple'"
+                        }
                     },
-                    "required": ["category", "content"]
+                    "required": ["russian_word", "english_word"]
                 }
             }
         },
@@ -42,31 +84,24 @@ def get_memory_tools() -> List[Dict]:
             "type": "function",
             "function": {
                 "name": "consult_russian_teacher_manual",
-                "description": "Search the Russian RAG database for hints, translations, or simple grammar rules.",
+                "description": (
+                    "Search stored Russian vocabulary and grammar rules. "
+                    "Use this when you need a hint about a word or grammar rule."
+                ),
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "query": {"type": "string", "description": "The Russian word or concept to look up."},
-                        "limit": {"type": "integer", "default": 1}
-                    }
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "send_message",
-                "description": "Speak to the child in simple Russian.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "message": {"type": "string", "description": "The Russian sentence to say."}
+                        "query": {
+                            "type": "string",
+                            "description": "The Russian word or grammar concept to look up."
+                        }
                     },
-                    "required": ["message"]
+                    "required": ["query"]
                 }
             }
         }
     ]
+
 
 class MemoryToolExecutor(BaseToolExecutor):
     """Executor for Jhony's educational memory tools."""
@@ -76,25 +111,139 @@ class MemoryToolExecutor(BaseToolExecutor):
         self.recall = recall
         self.archival = archival
 
-    def _save_child_info(self, args):
-        """Modified core_memory_append for child interests."""
-        block = self.memory.get_block(args['label'])
-        if not block: return "Block not found"
-        success, msg = block.append("\n" + args['content'])
-        if success: self.memory.save()
-        return f"Saved interest: {msg}"
+    # --- Jhony-specific tools ---
 
-    def _record_learned_word(self, args):
-        """Modified archival_insert for tracking progress."""
-        # Set importance high for newly learned words to keep them in context
-        self.archival.insert(args['category'], args['content'], importance=9)
-        return "Word progress recorded in long-term memory."
+    def _save_child_info(self, args: Dict) -> str:
+        """Append new info about the child to the human block."""
+        content = args.get("content", "").strip()
+        if not content:
+            return "Error: no content provided."
+        block = self.memory.get_block("human")
+        if not block:
+            return "Error: human block not found."
+        success, msg = block.append("\n" + content)
+        if success:
+            self.memory.save()
+            return f"Saved: {content}"
+        return f"Failed to save: {msg}"
 
-    def _consult_russian_teacher_manual(self, args):
-        """RAG lookup for Russian vocabulary and grammar."""
-        res = self.archival.search(args.get('query'), args.get('limit', 1))
-        return f"Teacher Manual Results: {res}"
+    def _update_child_info(self, args: Dict) -> str:
+        """Replace outdated info in the human block."""
+        old = args.get("old_content", "").strip()
+        new = args.get("new_content", "").strip()
+        if not old or not new:
+            return "Error: both old_content and new_content are required."
+        block = self.memory.get_block("human")
+        if not block:
+            return "Error: human block not found."
+        success, msg = block.replace(old, new)
+        if success:
+            self.memory.save()
+            return f"Updated child info."
+        return f"Update failed: {msg}"
+
+    def _record_learned_word(self, args: Dict) -> str:
+        """
+        Record a newly learned word in two places:
+          1. Archival memory — full searchable history
+          2. learned_words core block — immediately visible to the LLM in context
+        """
+        russian = args.get("russian_word", "").strip()
+        english = args.get("english_word", "").strip()
+        if not russian or not english:
+            return "Error: russian_word and english_word are required."
+
+        entry = f"{russian} ({english})"
+
+        # 1. Full record in archival for semantic search history
+        if self.archival:
+            self.archival.insert("vocabulary", entry, importance=9)
+
+        # 2. Compact entry in core memory for instant LLM visibility
+        learned_block = self.memory.get_block("learned_words")
+        if learned_block:
+            learned_block.append(f"\n{entry}" if learned_block.value else entry)
+            self.memory.save()
+
+        return f"Recorded: {entry}"
+
+    def _consult_russian_teacher_manual(self, args: Dict) -> str:
+        """Search archival memory for Russian vocabulary and grammar hints."""
+        query = args.get("query", "").strip()
+        if not query:
+            return "Error: query is required."
+        if not self.archival:
+            return "Error: archival memory not available."
+        results = self.archival.search(query, limit=3)
+        if not results:
+            return f"No entries found for: '{query}'"
+        lines = [f"- {r['content']}" for r in results]
+        return "Teacher Manual:\n" + "\n".join(lines)
+
+    # --- Standard memory tools (used by tests and generic tooling) ---
+
+    def _core_memory_append(self, args: Dict) -> str:
+        label = args.get("label")
+        content = args.get("content", "")
+        block = self.memory.get_block(label)
+        if not block:
+            return f"Memory block '{label}' not found."
+        success, message = block.append("\n" + content)
+        if success:
+            self.memory.save()
+            return f"Success: appended to {label} ({block.chars_current}/{block.limit} chars)"
+        return f"Failed: {message}"
+
+    def _core_memory_replace(self, args: Dict) -> str:
+        label = args.get("label")
+        old_content = args.get("old_content")
+        new_content = args.get("new_content")
+        block = self.memory.get_block(label)
+        if not block:
+            return f"Memory block '{label}' not found."
+        success, message = block.replace(old_content, new_content)
+        if success:
+            self.memory.save()
+            return f"Success: replaced content in {label} ({block.chars_current}/{block.limit} chars)"
+        return f"Failed: {message}"
+
+    def _archival_memory_insert(self, args: Dict) -> str:
+        category = args.get("category")
+        content = args.get("content")
+        importance = args.get("importance", 5)
+        if not self.archival:
+            return "Archival memory not available."
+        self.archival.insert(category, content, importance)
+        return f"Saved to archival [{category}] (importance: {importance}/10)"
+
+    def _archival_memory_search(self, args: Dict) -> str:
+        query = args.get("query")
+        limit = args.get("limit", 5)
+        if not self.archival:
+            return "Archival memory not available."
+        results = self.archival.search(query, limit)
+        if not results:
+            return f"No archival memories found for: '{query}'"
+        lines = [
+            f"{i}. [{r['category']}] {r['content'][:200]}"
+            for i, r in enumerate(results, 1)
+        ]
+        return f"Found {len(results)} results:\n" + "\n".join(lines)
+
+    def _recall_memory_search(self, args: Dict) -> str:
+        query = args.get("query")
+        limit = args.get("limit", 10)
+        if not self.recall:
+            return "Recall memory not available."
+        results = self.recall.search(query, limit)
+        if not results:
+            return "No recall memories found."
+        lines = [
+            f"{i}. [{r['role']}] {r['content'][:150]}"
+            for i, r in enumerate(results, 1)
+        ]
+        return f"Found {len(results)} results:\n" + "\n".join(lines)
 
     def get_tool_schemas(self) -> List[Dict]:
-        """Return simplified schemas for 1-2B models."""
+        """Return tool schemas for 1-2B models (memory tools only, no send_message)."""
         return get_memory_tools()
