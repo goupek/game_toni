@@ -5,6 +5,7 @@ Combines memory management with configurable personality system
 """
 
 import json
+import re
 import sys
 from openai import OpenAI
 from memory_system import Memory, RecallMemory, ArchivalMemory
@@ -164,7 +165,7 @@ def get_system_message() -> dict:
 
         "content": f"""
 ## Core Identity & Persona
-You are EDU-BOT, an empathetic and supportive AI language practice partner. Your goal is to have natural, friendly conversations with an A1-level Russian learner in English, while seamlessly exposing them to Russian vocabulary from your knowledge base.
+You are EDU-BOT, an empathetic and supportive AI language practice partner. Your goal is to have natural, friendly conversations with an A1-level Russian learner in English, while seamlessly exposing them to Russian vocabulary from the curriculum.
 
 ## The Golden Rule: Never Show Your Work
 You are strictly forbidden from verbalizing your internal thought process, planned actions, or the names of the tools you are about to call. Perform your tool calls silently, and then provide a natural, conversational response.
@@ -174,19 +175,20 @@ You are strictly forbidden from verbalizing your internal thought process, plann
 Your primary task is to weave Russian vocabulary into the conversation naturally.
 
 1.  **Prioritize Conversation:** Your main goal is to have a normal, engaging conversation in English.
-2.  **Identify Opportunities:** As you chat, identify simple, common English words (like 'hello', 'thank you', 'water', 'yes', 'no').
-3.  **Search Your Knowledge:** When you identify an opportunity, your first internal action is to silently call your `find_russian_word` tool to see if you know the Russian equivalent.
-4.  **Introduce the Word Naturally:**
-    - If the tool finds a word, gracefully "sprinkle" it into your response.
+2.  **Fetch the Next Word:** Silently call `get_next_word_to_learn` to retrieve the next word from the curriculum.
+3.  **Introduce the Word Naturally:**
+    - Gracefully "sprinkle" the word into your response.
     - Provide the Cyrillic spelling, a simple pronunciation, and the English meaning.
     - **Do not test the user.** Do not ask them to repeat it. The goal is exposure, not examination.
+4.  **Mark as Learned:** Once the word has been introduced naturally, call `mark_word_as_learned` with the word's ID.
 5.  **Continue the Conversation:** After introducing the word, seamlessly continue the English conversation.
 
 ---
 ## Example of Correct Behavior:
 User: "Thank you so much for your help!"
-Your Internal Action: [silently calls `find_russian_word(english_word="thank you")`]
-Your Spoken Response: "You're very welcome! By the way, for 'thank you', in Russian you would say 'Спасибо' (spa-see-ba). So, what were you working on before this?"
+Your Internal Action: [silently calls `get_next_word_to_learn`] → returns {{"word": "спасибо", "pronunciation": "spa-SEE-ba", "english": "thank you", "word_id": "L1_W1"}}
+Your Internal Action: [silently calls `mark_word_as_learned(word_id="L1_W1")`]
+Your Spoken Response: "You're very welcome! By the way, 'thank you' in Russian is 'Спасибо' (spa-SEE-ba). So, what were you working on before this?"
 
 ---
 ## WHAT NOT TO DO (Negative Constraints)
@@ -234,7 +236,6 @@ def execute_personality_command(fn_name: str, args: dict) -> str:
         if system_block:
             personality_config = personality_engine.profile.to_dict()
             # Update just the personality part of system block
-            import re
             pattern = r'Personality Configuration:.*?(?=\n\nCurrent model:)'
             new_personality = f"""Personality Configuration:
 - Humor: {personality_config['humor']}%
@@ -294,7 +295,6 @@ def chat_with_walle(user_input: str):
             response = msg1.content or "[No response from model]"
             
             # Clean up response
-            import re
             response = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL).strip()
             if not response:
                 response = "[Model only provided thinking, no actual response]"
@@ -336,15 +336,7 @@ def chat_with_walle(user_input: str):
             # Execute function
             if fn_name in ["set_personality", "get_personality_settings"]:
                 result_text = execute_personality_command(fn_name, args)
-            # --- ADD THIS ELIF BLOCK ---
             elif fn_name in ["get_next_word_to_learn", "mark_word_as_learned"]:
-                result_text = language_tool_executor.execute(fn_name, args)
-            # --- END OF ADDITION ---
-            # Inside the 'for call in tool_calls:' loop
-
-            # ... (previous if/elif blocks)
-            # --- MODIFY THIS ELIF BLOCK ---
-            elif fn_name == "find_russian_word":
                 result_text = language_tool_executor.execute(fn_name, args)
             else:
                 # Memory management tool
@@ -398,7 +390,6 @@ def chat_with_walle(user_input: str):
         response = final.choices[0].message.content or "[No response from model]"
         
         # Clean up response
-        import re
         response = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL).strip()
         if not response:
             response = "[Model only provided thinking, no actual response]"

@@ -126,8 +126,8 @@ class ContextManager:
     """
     
     def __init__(self):
-        #self.visual: Optional[VisualContext] = None
-        #self.environment: Optional[EnvironmentContext] = None
+        self.visual = None  # VisualContext (disabled)
+        self.environment = None  # EnvironmentContext (disabled)
         self.interaction: Optional[InteractionContext] = None
         self.spontaneous_observations: List[str] = []
     

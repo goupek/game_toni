@@ -18,6 +18,11 @@ numpy
 # This allows the chatbot to find memories based on meaning, not just keywords.
 sentence-transformers
 
+# pyarrow >= 14.0 removed PyExtensionType, which older transformers/datasets versions
+# rely on. Pinning below 14 prevents the "module 'pyarrow' has no attribute
+# 'PyExtensionType'" error that breaks the embedding model load.
+pyarrow<14.0
+
 # --- PyTorch (CPU Version) ---
 
 # PyTorch is the underlying machine learning framework for sentence-transformers.

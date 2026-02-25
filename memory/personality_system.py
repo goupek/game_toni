@@ -146,7 +146,7 @@ Embody these traits naturally in your responses. Don't announce your personality
     
     def generate_spontaneous_comment(self, context: Dict) -> Optional[str]:
         """Generate spontaneous observations based on curiosity level"""
-        if not self.should_observe_environment():
+        if not self.profile.should_observe_environment():
             return None
         
         # This would integrate with sensor data in the real system
