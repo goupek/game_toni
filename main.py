@@ -45,19 +45,42 @@ try:
 except pygame.error:
     incorrect_sound = None
 
+# ----------------------------
+# PASTEL STYLE (match launcher.py palette)
+# ----------------------------
+PURPLE   = (156, 137, 184)   # #9C89B8
+PINK     = (240, 166, 202)   # #F0A6CA
+LIGHT_P  = (239, 195, 230)   # #EFC3E6
+CREAM    = (240, 230, 239)   # #F0E6EF
+LAVENDER = (184, 190, 221)   # #B8BEDD
+TEXT_DARK = (58, 50, 72)
+SHADOW   = (190, 185, 174)
+# Feedback colors (pastel, in-palette where possible)
+CORRECT_HL = (129, 199, 132)   # soft green
+WRONG_HL   = (239, 150, 150)   # soft red (pink-tinted)
+
+def _best_font(size, bold=False):
+    for name in ("Nunito", "Baloo 2", "Ubuntu", "Noto Sans", "DejaVu Sans", "Arial", ""):
+        try:
+            f = pygame.font.SysFont(name, max(14, size), bold=bold)
+            if f:
+                return f
+        except Exception:
+            pass
+    return pygame.font.Font(None, max(14, size))
 
 # ----------------------------
-# HELPER: draw a button
+# HELPER: draw a button (rounded, soft shadow, pastel)
 # ----------------------------
-def draw_button(text, x, y, w, h, color=(200, 200, 200)):
-    pygame.draw.rect(screen, color, (x, y, w, h))
-    font = pygame.font.SysFont("Arial", h // 2)
-    label = font.render(text, True, (0, 0, 0))
-    screen.blit(
-        label,
-        (x + (w - label.get_width()) // 2,
-         y + (h - label.get_height()) // 2),
-    )
+def draw_button(text, x, y, w, h, color, text_color=TEXT_DARK, radius=None):
+    if radius is None:
+        radius = min(w, h) // 4
+    # soft shadow
+    pygame.draw.rect(screen, SHADOW, (x + 4, y + 4, w, h), border_radius=radius)
+    pygame.draw.rect(screen, color, (x, y, w, h), border_radius=radius)
+    font = _best_font(min(w, h) // 2)
+    label = font.render(text, True, text_color)
+    screen.blit(label, label.get_rect(center=(x + w // 2, y + h // 2)))
     return pygame.Rect(x, y, w, h)
 
 
@@ -92,29 +115,31 @@ def generate_grid(w_r, h_r, k=1, l=1, x1=0, y1=0, x2=100, y2=100):
 # GAME OVER SCREEN (for Play mode)
 # ----------------------------
 def game_over_screen(score):
-    font_big = pygame.font.SysFont("Arial", int(SCREEN_H * 0.08))
-    font_small = pygame.font.SysFont("Arial", int(SCREEN_H * 0.05))
+    font_big = _best_font(int(SCREEN_H * 0.08), bold=True)
+    font_small = _best_font(int(SCREEN_H * 0.05))
 
     while True:
-        screen.fill((255, 255, 255))
+        screen.fill(CREAM)
+        # Soft header strip
+        pygame.draw.rect(screen, LIGHT_P, (0, 0, SCREEN_W, int(SCREEN_H * 0.14)))
+        pygame.draw.rect(screen, LAVENDER, (0, int(SCREEN_H * 0.14) - 6, SCREEN_W, 6))
 
-        title = font_big.render("Game ended", True, (0, 0, 0))
+        title = font_big.render("Game ended", True, TEXT_DARK)
         title_x = (SCREEN_W - title.get_width()) // 2
         title_y = SCREEN_H // 3
         screen.blit(title, (title_x, title_y))
 
-        score_text = font_small.render(f"Your score: {score}", True, (0, 0, 0))
+        score_text = font_small.render(f"Your score: {score}", True, TEXT_DARK)
         score_x = (SCREEN_W - score_text.get_width()) // 2
         score_y = title_y + title.get_height() + 40
         screen.blit(score_text, (score_x, score_y))
 
-        # Buttons: Menu + Exit
+        # Buttons: Menu + Exit (pastel rounded)
         w_r, h_r = 0.20, 0.10
         w, h = int(SCREEN_W * w_r), int(SCREEN_H * h_r)
-        # Give them plenty of horizontal space so the grid always fits
         grid = generate_grid(w_r, h_r, 2, 1, 0.25, 0.65, 0.75, 0.90)
-        menu_btn = draw_button("Menu", grid[0][0], grid[0][1], w, h)
-        exit_btn = draw_button("Exit", grid[1][0], grid[1][1], w, h)
+        menu_btn = draw_button("Menu", grid[0][0], grid[0][1], w, h, PURPLE, CREAM)
+        exit_btn = draw_button("Exit", grid[1][0], grid[1][1], w, h, LAVENDER, TEXT_DARK)
 
         pygame.display.update()
 
@@ -136,15 +161,22 @@ def game_over_screen(score):
 # ----------------------------
 def menu_screen():
     while True:
-        screen.fill((255, 255, 255))
+        screen.fill(CREAM)
+        # Header bar (pastel style)
+        header_h = int(SCREEN_H * 0.12)
+        pygame.draw.rect(screen, PINK, (0, 0, SCREEN_W, header_h))
+        pygame.draw.rect(screen, LIGHT_P, (0, header_h - 8, SCREEN_W, 8))
+        title_font = _best_font(int(SCREEN_H * 0.055), bold=True)
+        title = title_font.render("Animal Game", True, CREAM)
+        screen.blit(title, title.get_rect(center=(SCREEN_W // 2, header_h // 2)))
         # 4 vertical buttons: Talk, Learn, Play, Exit
         w_r, h_r = 0.25, 0.18
         w, h = int(SCREEN_W * w_r), int(SCREEN_H * h_r)
-        grid = generate_grid(w_r, h_r, 1, 4, 0.375, 0.10, 1 - 0.375, 0.90)
-        talk_btn = draw_button("Talk", grid[0][0], grid[0][1], w, h)
-        learn_btn = draw_button("Learn", grid[1][0], grid[1][1], w, h)
-        play_btn = draw_button("Play", grid[2][0], grid[2][1], w, h)
-        exit_btn = draw_button("Exit", grid[3][0], grid[3][1], w, h)
+        grid = generate_grid(w_r, h_r, 1, 4, 0.375, 0.18, 1 - 0.375, 0.92)
+        talk_btn = draw_button("Talk", grid[0][0], grid[0][1], w, h, PINK, CREAM)
+        learn_btn = draw_button("Learn", grid[1][0], grid[1][1], w, h, PURPLE, CREAM)
+        play_btn = draw_button("Play", grid[2][0], grid[2][1], w, h, PURPLE, CREAM)
+        exit_btn = draw_button("Exit", grid[3][0], grid[3][1], w, h, LAVENDER, TEXT_DARK)
 
         pygame.display.update()
 
@@ -198,21 +230,23 @@ def game_screen():
     visible = [False] * len(grid_rects)
 
     running = True
+    grid_radius = 20
     while running:
-        screen.fill((255, 255, 255))
-
-        # Toolbar (top)
+        screen.fill(CREAM)
+        # Toolbar (top) pastel
         w_r_toolbar, h_r_toolbar = 0.20, 0.10
         w_toolbar, h_toolbar = int(SCREEN_W * w_r_toolbar), int(SCREEN_H * h_r_toolbar)
         toolbar_grid = generate_grid(w_r_toolbar, h_r_toolbar, 3, 1, 0.10, 0.05, 0.90, 0.20)
-        menu_btn = draw_button("Menu", toolbar_grid[0][0], toolbar_grid[0][1], w_toolbar, h_toolbar)
-        start_btn = draw_button("Start", toolbar_grid[1][0], toolbar_grid[1][1], w_toolbar, h_toolbar)
-        exit_btn = draw_button("Exit", toolbar_grid[2][0], toolbar_grid[2][1], w_toolbar, h_toolbar)
+        menu_btn = draw_button("Menu", toolbar_grid[0][0], toolbar_grid[0][1], w_toolbar, h_toolbar, LAVENDER, TEXT_DARK)
+        start_btn = draw_button("Start", toolbar_grid[1][0], toolbar_grid[1][1], w_toolbar, h_toolbar, PINK, CREAM)
+        exit_btn = draw_button("Exit", toolbar_grid[2][0], toolbar_grid[2][1], w_toolbar, h_toolbar, LAVENDER, TEXT_DARK)
 
-        # Draw grid: show images that have been revealed
+        # Draw grid: rounded cells, PURPLE border; show images when revealed
         for i, (x, y) in enumerate(grid_positions):
             rect = grid_rects[i]
-            pygame.draw.rect(screen, (0, 0, 0), rect, 3)
+            pygame.draw.rect(screen, SHADOW, (rect.x + 3, rect.y + 3, rect.w, rect.h), border_radius=grid_radius)
+            pygame.draw.rect(screen, LAVENDER, rect, border_radius=grid_radius)
+            pygame.draw.rect(screen, PURPLE, rect, 2, border_radius=grid_radius)
             if game_started and visible[i]:
                 img = images[i]
                 screen.blit(img, (x, y))
@@ -278,7 +312,7 @@ def play_screen():
     # List of remaining animals to ask (indices), so each is used once
     remaining_indices = list(range(len(grid_rects)))
 
-    font = pygame.font.SysFont("Arial", int(SCREEN_H * 0.05))
+    font = _best_font(int(SCREEN_H * 0.05))
 
     def clear_highlights():
         for i in range(len(grid_rects)):
@@ -317,44 +351,39 @@ def play_screen():
                 game_finished = True
                 break
 
-        screen.fill((255, 255, 255))
-
-        # Toolbar
+        screen.fill(CREAM)
+        # Toolbar pastel
         w_r_toolbar, h_r_toolbar = 0.20, 0.10
         w_toolbar, h_toolbar = int(SCREEN_W * w_r_toolbar), int(SCREEN_H * h_r_toolbar)
         toolbar_grid = generate_grid(w_r_toolbar, h_r_toolbar, 3, 1, 0.10, 0.05, 0.90, 0.20)
-        menu_btn = draw_button("Menu", toolbar_grid[0][0], toolbar_grid[0][1], w_toolbar, h_toolbar)
+        menu_btn = draw_button("Menu", toolbar_grid[0][0], toolbar_grid[0][1], w_toolbar, h_toolbar, LAVENDER, TEXT_DARK)
 
-        # Middle area: show which animal to find
-        pygame.draw.rect(screen, (230, 230, 230),
-                         (toolbar_grid[1][0], toolbar_grid[1][1], w_toolbar, h_toolbar))
+        # Middle area: "Find Game" in rounded LAVENDER bar
+        mid_rect = pygame.Rect(toolbar_grid[1][0], toolbar_grid[1][1], w_toolbar, h_toolbar)
+        pygame.draw.rect(screen, SHADOW, (mid_rect.x + 3, mid_rect.y + 3, mid_rect.w, mid_rect.h), border_radius=14)
+        pygame.draw.rect(screen, LAVENDER, mid_rect, border_radius=14)
         if target_index is not None:
-            label = font.render(f"Find Game", True, (0, 0, 0))
-            screen.blit(label, (toolbar_grid[1][0] + (w_toolbar - label.get_width()) // 2,
-                                toolbar_grid[1][1] + (h_toolbar - label.get_height()) // 2))
+            label = font.render("Find Game", True, TEXT_DARK)
+            screen.blit(label, label.get_rect(center=(mid_rect.centerx, mid_rect.centery)))
 
-        exit_btn = draw_button("Exit", toolbar_grid[2][0], toolbar_grid[2][1], w_toolbar, h_toolbar)
+        exit_btn = draw_button("Exit", toolbar_grid[2][0], toolbar_grid[2][1], w_toolbar, h_toolbar, LAVENDER, TEXT_DARK)
 
-        # Draw grid with all animals visible
+        # Draw grid with all animals visible; rounded cells, pastel highlights
+        grid_radius = 20
         for i, (x, y) in enumerate(grid_positions):
             rect = grid_rects[i]
-
-            # First draw the image fully inside the cell
             screen.blit(images[i], (x, y))
-
-            # Then draw the border on top so it's always visible
             if highlight_color[i] is not None and now < highlight_until[i]:
                 color = highlight_color[i]
                 width = 7
             else:
-                color = (0, 0, 0)
-                width = 3
-            pygame.draw.rect(screen, color, rect, width)
+                color = PURPLE
+                width = 2
+            pygame.draw.rect(screen, color, rect, width, border_radius=grid_radius)
 
-        # Draw score in bottom-right corner
-        score_text = font.render(f"Score: {score}", True, (0, 0, 0))
-        screen.blit(score_text, (SCREEN_W - score_text.get_width() - 20,
-                                 SCREEN_H - score_text.get_height() - 20))
+        # Score in bottom-right, pastel style
+        score_text = font.render(f"Score: {score}", True, TEXT_DARK)
+        screen.blit(score_text, (SCREEN_W - score_text.get_width() - 24, SCREEN_H - score_text.get_height() - 24))
 
         pygame.display.update()
 
@@ -399,22 +428,15 @@ def play_screen():
                             if correct_sound is not None:
                                 correct_sound.play()
                             score += 1
-
-                            # clicked cell = green
-                            highlight_color[i] = (0, 255, 0)
+                            highlight_color[i] = CORRECT_HL
                             highlight_until[i] = now + feedback_len
 
                         else:
-                            # Incorrect answer
                             if incorrect_sound is not None:
                                 incorrect_sound.play()
-
-                            # wrong chosen cell = red
-                            highlight_color[i] = (255, 0, 0)
+                            highlight_color[i] = WRONG_HL
                             highlight_until[i] = now + feedback_len
-
-                            # correct animal = green
-                            highlight_color[target_index] = (0, 255, 0)
+                            highlight_color[target_index] = CORRECT_HL
                             highlight_until[target_index] = now + feedback_len
 
                         feedback_active_until = now + feedback_len
