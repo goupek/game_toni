@@ -49,14 +49,22 @@ BASE_DIR  = str(_ROOT)
 IMG_DIR   = os.path.join(BASE_DIR, "images")
 AUDIO_DIR = os.path.join(BASE_DIR, "audio")
 
-BG    = (245, 248, 255)
-WHITE = (255, 255, 255)
-BLACK = (15, 15, 15)
-GRAY  = (230, 230, 230)
-DARK  = (90, 90, 90)
-BLUE  = (70, 130, 240)
-GREEN = (40, 190, 90)
-RED   = (235, 60, 60)
+# Pastel style (match launcher.py palette)
+PURPLE   = (156, 137, 184)   # #9C89B8
+PINK     = (240, 166, 202)   # #F0A6CA
+LIGHT_P  = (239, 195, 230)   # #EFC3E6
+CREAM    = (240, 230, 239)   # #F0E6EF
+LAVENDER = (184, 190, 221)   # #B8BEDD
+TEXT_DARK = (58, 50, 72)
+SHADOW_FILL = (190, 185, 174)
+BG    = CREAM
+WHITE = CREAM
+BLACK = TEXT_DARK
+GRAY  = LAVENDER
+DARK  = PURPLE
+BLUE  = PURPLE
+GREEN = (129, 199, 132)      # soft green (correct)
+RED   = (239, 150, 150)      # soft red (wrong)
 
 WORD_TO_FEEDBACK_DELAY_MS = 1000
 CORRECT_NEXT_DELAY_MS     = 2000
@@ -76,6 +84,16 @@ def audio_path(filename):
 
 def image_path(filename):
     return os.path.join(IMG_DIR, filename)
+
+def _best_font(size, bold=False):
+    for name in ("Nunito", "Baloo 2", "Ubuntu", "Noto Sans", "DejaVu Sans", "Arial", ""):
+        try:
+            f = pygame.font.SysFont(name, max(14, size), bold=bold)
+            if f:
+                return f
+        except Exception:
+            pass
+    return pygame.font.Font(None, max(14, size))
 
 # -----------------------------
 # TTS AUDIO
@@ -288,11 +306,12 @@ def scale_fit(surface, target_w, target_h):
 # BUTTON
 # -----------------------------
 class Button:
-    def __init__(self, rect, label, show_replay=False):
+    def __init__(self, rect, label, show_replay=False, bg=None, text_color=None):
         self.rect        = pygame.Rect(rect)
         self.label       = label
         self.border      = DARK
-        self.bg          = WHITE
+        self.bg          = bg if bg is not None else LAVENDER
+        self.text_color  = text_color if text_color is not None else BLACK
         self.show_replay = show_replay
         self.replay_rect = None
 
@@ -309,14 +328,17 @@ class Button:
         return self.replay_rect is not None and self.replay_rect.collidepoint(pos)
 
     def draw(self, screen, font, border_w, s, replay_icon_surf=None):
-        pygame.draw.rect(screen, self.bg, self.rect, border_radius=12)
-        pygame.draw.rect(screen, self.border, self.rect, width=border_w, border_radius=12)
+        # Soft shadow (pastel)
+        shadow_r = self.rect.move(3, 4)
+        pygame.draw.rect(screen, SHADOW_FILL, shadow_r, border_radius=14)
+        pygame.draw.rect(screen, self.bg, self.rect, border_radius=14)
+        pygame.draw.rect(screen, self.border, self.rect, width=border_w, border_radius=14)
 
         replay_space = int(90 * s) if self.show_replay else 0
         text_area    = self.rect.copy()
         text_area.w -= replay_space
 
-        txt = font.render(self.label, True, BLACK)
+        txt = font.render(self.label, True, self.text_color)
         screen.blit(txt, txt.get_rect(center=text_area.center))
 
         if self.show_replay:
@@ -327,8 +349,8 @@ class Button:
                 self.rect.centery - icon_size // 2,
                 icon_size, icon_size,
             )
-            pygame.draw.rect(screen, WHITE, self.replay_rect, border_radius=10)
-            pygame.draw.rect(screen, DARK,  self.replay_rect, 2, border_radius=10)
+            pygame.draw.rect(screen, WHITE, self.replay_rect, border_radius=12)
+            pygame.draw.rect(screen, DARK, self.replay_rect, 2, border_radius=12)
             if replay_icon_surf:
                 icon_rect = replay_icon_surf.get_rect(center=self.replay_rect.center)
                 screen.blit(replay_icon_surf, icon_rect)
@@ -354,12 +376,12 @@ class UI:
         def sc(v):
             return max(1, int(v * self.s))
 
-        self.font_title      = pygame.font.SysFont(None, sc(76))
-        self.font_prompt     = pygame.font.SysFont(None, sc(54))
-        self.font_btn        = pygame.font.SysFont(None, sc(54))
-        self.font_small      = pygame.font.SysFont(None, sc(30))
-        self.font_menu_title = pygame.font.SysFont(None, sc(90))
-        self.font_menu_btn   = pygame.font.SysFont(None, sc(60))
+        self.font_title      = _best_font(sc(76), bold=True)
+        self.font_prompt     = _best_font(sc(54))
+        self.font_btn        = _best_font(sc(54))
+        self.font_small      = _best_font(sc(30))
+        self.font_menu_title = _best_font(sc(90), bold=True)
+        self.font_menu_btn   = _best_font(sc(60))
 
         self.border_w = max(2, sc(6))
 
@@ -438,7 +460,7 @@ class UI:
 # -----------------------------
 def run_menu(screen, ui):
     clock    = pygame.time.Clock()
-    play_btn = Button(ui.menu_play, "Play")
+    play_btn = Button(ui.menu_play, "Play", bg=PURPLE, text_color=CREAM)
     exit_btn = Button(ui.menu_exit, "Exit")
 
     while True:
@@ -457,8 +479,12 @@ def run_menu(screen, ui):
                     return "quit"
 
         screen.fill(BG)
-        title = ui.font_menu_title.render("Game 2 (adaptive)", True, BLACK)
-        screen.blit(title, title.get_rect(center=(ui.w // 2, int(200 * ui.s))))
+        # Pastel header strip
+        header_h = int(140 * ui.s)
+        pygame.draw.rect(screen, PINK, (0, 0, ui.w, header_h - 6))
+        pygame.draw.rect(screen, LIGHT_P, (0, header_h - 6, ui.w, 6))
+        title = ui.font_menu_title.render("Game 2 (adaptive)", True, CREAM)
+        screen.blit(title, title.get_rect(center=(ui.w // 2, header_h // 2)))
 
         play_btn.draw(screen, ui.font_menu_btn, ui.border_w, ui.s, replay_icon_surf=None)
         exit_btn.draw(screen, ui.font_menu_btn, ui.border_w, ui.s, replay_icon_surf=None)
@@ -540,9 +566,10 @@ class StoryGame:
         self.ui.rebuild(new_w, new_h)
         new_buttons = []
         for rect, old_btn in zip(self.ui.button_rects, self.buttons):
-            b        = Button(rect, old_btn.label, show_replay=True)
-            b.border = old_btn.border
-            b.bg     = old_btn.bg
+            b           = Button(rect, old_btn.label, show_replay=True)
+            b.border    = old_btn.border
+            b.bg        = old_btn.bg
+            b.text_color = getattr(old_btn, 'text_color', BLACK)
             new_buttons.append(b)
         self.buttons = new_buttons
         self.rescale_current_image()
@@ -566,8 +593,9 @@ class StoryGame:
         title = self.ui.font_title.render("Game 2", True, BLACK)
         self.screen.blit(title, (self.ui.title_area.x, self.ui.title_area.y))
 
-        pygame.draw.rect(self.screen, WHITE, self.ui.prompt_area, border_radius=12)
-        pygame.draw.rect(self.screen, DARK,  self.ui.prompt_area, 3, border_radius=12)
+        pygame.draw.rect(self.screen, SHADOW_FILL, self.ui.prompt_area.move(3, 4), border_radius=14)
+        pygame.draw.rect(self.screen, LAVENDER, self.ui.prompt_area, border_radius=14)
+        pygame.draw.rect(self.screen, DARK, self.ui.prompt_area, 3, border_radius=14)
 
         prompt    = self.rounds[self.index]["prompt_text"]
         text_max_w = (
@@ -584,16 +612,17 @@ class StoryGame:
             self.screen.blit(t, (self.ui.prompt_area.x + max(5, int(15 * self.ui.s)), y))
             y += t.get_height() + max(2, int(8 * self.ui.s))
 
-        pygame.draw.rect(self.screen, WHITE, self.ui.prompt_replay, border_radius=10)
-        pygame.draw.rect(self.screen, DARK,  self.ui.prompt_replay, 2, border_radius=10)
+        pygame.draw.rect(self.screen, WHITE, self.ui.prompt_replay, border_radius=12)
+        pygame.draw.rect(self.screen, DARK, self.ui.prompt_replay, 2, border_radius=12)
         if self.ui.prompt_replay_icon:
             icon_rect = self.ui.prompt_replay_icon.get_rect(
                 center=self.ui.prompt_replay.center,
             )
             self.screen.blit(self.ui.prompt_replay_icon, icon_rect)
 
-        pygame.draw.rect(self.screen, WHITE, self.ui.image_area, border_radius=12)
-        pygame.draw.rect(self.screen, DARK,  self.ui.image_area, 3, border_radius=12)
+        pygame.draw.rect(self.screen, SHADOW_FILL, self.ui.image_area.move(3, 4), border_radius=14)
+        pygame.draw.rect(self.screen, LAVENDER, self.ui.image_area, border_radius=14)
+        pygame.draw.rect(self.screen, DARK, self.ui.image_area, 3, border_radius=14)
 
         if self.fit_image:
             img_rect = self.fit_image.get_rect(center=self.ui.image_area.center)
@@ -722,8 +751,12 @@ def finish_screen(screen, ui, score, total):
                     return "menu"
 
         screen.fill(BG)
+        # Pastel header strip
+        header_h = int(160 * ui.s)
+        pygame.draw.rect(screen, LIGHT_P, (0, 0, ui.w, header_h - 6))
+        pygame.draw.rect(screen, LAVENDER, (0, header_h - 6, ui.w, 6))
         t1 = ui.font_menu_title.render("Ready!", True, BLACK)
-        t2 = ui.font_menu_btn.render("Score: {}/{}".format(score, total), True, BLACK)
+        t2 = ui.font_menu_btn.render("Score: {}/{}".format(score, total), True, PURPLE)
         screen.blit(t1, t1.get_rect(center=(ui.w // 2, int(240 * ui.s))))
         screen.blit(t2, t2.get_rect(center=(ui.w // 2, int(330 * ui.s))))
 
