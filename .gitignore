@@ -1,0 +1,9 @@
+models/
+Qwen3-TTS-0.6B-CustomVoice/
+
+__pycache__/
+.venv/
+.env
+
+.wav
+.mp3
