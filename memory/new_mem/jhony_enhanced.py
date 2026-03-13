@@ -27,7 +27,7 @@ from collections import deque
 from datetime import datetime
 from config import conf
 
-from memory_system import Memory, RecallMemory, ArchivalMemory
+from memory_system import Memory, RecallMemory, ArchivalMemory, memory_health_report, export_memory_backup
 from memory_tools import MemoryToolExecutor
 from personality_system import PersonalityEngine
 from context_manager import ContextManager, InteractionContext
@@ -53,9 +53,13 @@ ctx_mgr     = ContextManager()
 # Catches facts the model reliably misses at 1-2B parameter scale.
 # ---------------------------------------------------------------------------
 
-_NAME_RE   = re.compile(r'\bmy name is\s+([A-Za-z]+)', re.IGNORECASE)
-_LOVE_RE   = re.compile(r'\b(i love|i like|my favou?rite)\s+([^,.!?\n]{3,50})', re.IGNORECASE)
-_HAVE_RE   = re.compile(r'\bi have (?:a |an )?([A-Za-z]+(?: [A-Za-z]+)?)\b', re.IGNORECASE)
+_NAME_RE     = re.compile(r'\bmy name is\s+([A-Za-z]+)', re.IGNORECASE)
+_CALL_ME_RE  = re.compile(r'\bcall me\s+([A-Za-z]+)\b', re.IGNORECASE)
+_LOVE_RE     = re.compile(r'\b(i love|i like|my favou?rite)\s+([^,.!?\n]{3,50})', re.IGNORECASE)
+_DONT_LIKE_RE = re.compile(r"\bi don'?t like\s+([^,.!?\n]{3,40})", re.IGNORECASE)
+_HAVE_RE     = re.compile(r'\bi have (?:a |an )?([A-Za-z]+(?: [A-Za-z]+)?)\b', re.IGNORECASE)
+_FAMILY_RE   = re.compile(r'\bmy (mom|mother|dad|father|sister|brother|grandma|grandpa)\s+(?:is\s+)?([^,.!?\n]{2,40})', re.IGNORECASE)
+_AGE_RE      = re.compile(r"\bI'?m\s+(\d{1,2})\s*years?\s*old\b", re.IGNORECASE)
 
 
 def auto_extract_facts(user_input: str) -> None:
@@ -68,22 +72,36 @@ def auto_extract_facts(user_input: str) -> None:
     if not block:
         return
 
+    changed = False
     facts = []
 
     m = _NAME_RE.search(user_input)
     if m:
         name = m.group(1).capitalize()
-        # Avoid saving common words accidentally matched as names
-        if name.lower() not in {"a", "an", "the", "my", "your", "not"}:
-            # Overwrite if we previously had "unknown"
-            if "unknown" in block.value and name not in block.value:
-                facts.append(("replace", "Child's name: unknown.", f"Child's name: {name}."))
-            elif name not in block.value:
-                facts.append(("append", f"Child's name: {name}."))
+        if name.lower() not in {"a", "an", "the", "my", "your", "not"} and name not in block.value:
+            success, _ = block.replace_line_by_key("Child's name:", f"Child's name: {name}.")
+            if success:
+                changed = True
+                print(f"   📝 [auto-saved: Child's name: {name}.]")
+
+    m = _CALL_ME_RE.search(user_input)
+    if m:
+        name = m.group(1).capitalize()
+        if name.lower() not in {"a", "an", "the", "my", "your", "not"} and name not in block.value:
+            success, _ = block.replace_line_by_key("Child's name:", f"Child's name: {name}.")
+            if success:
+                changed = True
+                print(f"   📝 [auto-saved: Child's name: {name}.]")
 
     for m in _LOVE_RE.finditer(user_input):
         interest = m.group(2).strip().rstrip(".,!?")
         entry = f"Child likes: {interest}."
+        if entry not in block.value:
+            facts.append(("append", entry))
+
+    for m in _DONT_LIKE_RE.finditer(user_input):
+        dislike = m.group(1).strip().rstrip(".,!?")
+        entry = f"Child dislikes: {dislike}."
         if entry not in block.value:
             facts.append(("append", entry))
 
@@ -94,12 +112,21 @@ def auto_extract_facts(user_input: str) -> None:
         if entry not in block.value:
             facts.append(("append", entry))
 
-    changed = False
+    for m in _FAMILY_RE.finditer(user_input):
+        role, desc = m.group(1).lower(), m.group(2).strip().rstrip(".,!?")
+        entry = f"Child family: {role} — {desc}."
+        if entry not in block.value:
+            facts.append(("append", entry))
+
+    m = _AGE_RE.search(user_input)
+    if m:
+        age = m.group(1)
+        entry = f"Child age: {age} years."
+        if entry not in block.value:
+            facts.append(("append", entry))
+
     for fact in facts:
-        if fact[0] == "replace":
-            success, _ = block.replace(fact[1], fact[2])
-        else:
-            success, _ = block.append(f"\n{fact[1]}")
+        success, _ = block.append(f"\n{fact[1]}")
         if success:
             changed = True
             print(f"   📝 [auto-saved: {fact[-1]}]")
@@ -109,12 +136,30 @@ def auto_extract_facts(user_input: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# RAG
+# RAG (configurable limits + query expansion)
 # ---------------------------------------------------------------------------
 
+_REMEMBER_QUERY_RE = re.compile(
+    r"what do you remember|what'?s? my name|do you remember me|remember about me|"
+    r"what do you know about me|tell me what you know",
+    re.IGNORECASE
+)
+
+
+def expand_query_for_rag(query: str) -> str:
+    """Expand 'what do you remember about me?' style queries for better retrieval."""
+    if _REMEMBER_QUERY_RE.search(query):
+        return query + " child name interests likes pets family"
+    return query
+
+
 def retrieve_relevant_context(query: str) -> str:
-    hits  = recall_mem.search(query, limit=3)
-    facts = archival_mem.search(query, limit=3)
+    """Fetch recall + archival results using configurable limits; expand query when needed."""
+    expanded = expand_query_for_rag(query)
+    recall_k = getattr(conf, "RAG_RECALL_K", 3)
+    archival_k = getattr(conf, "RAG_ARCHIVAL_K", 3)
+    hits = recall_mem.search(expanded, limit=recall_k)
+    facts = archival_mem.search(expanded, limit=archival_k)
     if not hits and not facts:
         return ""
     parts = ["[RECENT CONTEXT]"]
@@ -125,6 +170,19 @@ def retrieve_relevant_context(query: str) -> str:
         for f in facts:
             parts.append(f"  - {f['content'][:100]}")
     return "\n".join(parts)
+
+
+def format_last_turns(messages: list, max_messages: int) -> str:
+    """Format the last N messages as a [LAST DIALOGUE] block for context."""
+    n = min(max_messages, len(messages))
+    if n == 0:
+        return ""
+    recent = list(messages)[-n:]
+    lines = ["[LAST DIALOGUE]"]
+    for m in recent:
+        role, content = m.get("role", ""), m.get("content", "")
+        lines.append(f"  {role}: {content[:120]}")
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -240,17 +298,23 @@ class ChatSession:
     def get_messages(self, rag_context: str = "") -> list:
         """
         Build the full message list for an API call.
-        RAG context is injected as a second system message — NOT glued to the
-        user message — so it never pollutes session history.
+        RAG and last-turns are injected as separate system messages so the model
+        always sees recent dialogue even when search returns older hits.
         """
         msgs = [{"role": "system", "content": get_system_prompt()}]
         if rag_context.strip():
             msgs.append({"role": "system", "content": rag_context})
+        last_n = getattr(conf, "RAG_LAST_N_TURNS", 4)
+        turns = format_last_turns(list(self.history), last_n)
+        if turns:
+            msgs.append({"role": "system", "content": turns})
         msgs.extend(list(self.history))
         return msgs
 
 
 session = ChatSession()
+# Session/lesson scope: one ID per run for "what did we learn today?" style retrieval
+current_session_id: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -295,7 +359,7 @@ def chat(user_input: str) -> None:
 
     # ── Store in recall and session ────────────────────────────────────────
     ctx_mgr.update_interaction(InteractionContext(last_interaction=datetime.now()))
-    recall_mem.insert("user", user_input, defer_embedding=True)
+    recall_mem.insert("user", user_input, defer_embedding=True, session_id=current_session_id or None)
     session.add("user", user_input)
 
     # ── Build per-turn working message chain ──────────────────────────────
@@ -420,7 +484,7 @@ def chat(user_input: str) -> None:
                     break
 
         print(f"\n🇷🇺 Jhony: {spoken_message}")
-        recall_mem.insert("assistant", spoken_message)
+        recall_mem.insert("assistant", spoken_message, session_id=current_session_id or None)
         session.add("assistant", spoken_message)
     else:
         print("⚠️  Jhony produced no spoken output this turn.")
@@ -434,6 +498,8 @@ def chat(user_input: str) -> None:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
+    global current_session_id
+    current_session_id = datetime.now().strftime("%Y-%m-%d-%H%M")
     print(f"🎓 Jhony (Zhanibek) Online — Ready to teach Russian!")
     print(f"   Model    : {MODEL_NAME}")
     print(f"   Recall   : {recall_mem.get_count()} messages stored")
@@ -445,6 +511,9 @@ def main() -> None:
     human = core_mem.get_block("human")
     if human:
         print(f"   Child    : {human.value.strip()}")
+    health = memory_health_report(core_mem, recall_mem, archival_mem)
+    if health.get("db_errors"):
+        print(f"   ⚠️  Health: {health['db_errors']}")
     print()
 
     while True:

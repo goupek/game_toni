@@ -5,6 +5,7 @@ Optimized for NVIDIA Jetson Orin Nano.
 """
 
 import json
+import math
 import sqlite3
 import threading
 import numpy as np
@@ -344,7 +345,35 @@ class Block:
             self.metadata["last_modified"] = datetime.now().isoformat()
             return True, "Success"
         return False, f"New content too large ({len(new_value)} > {self.limit})"
-    
+
+    def replace_line_by_key(self, key_prefix: str, new_line: str) -> tuple[bool, str]:
+        """
+        Find a line that starts with key_prefix (e.g. "Child's name:") and replace it
+        with new_line. If no such line exists, append new_line. Used for key-based
+        updates so the model does not need exact substring match.
+        """
+        if self.read_only:
+            return False, f"Block '{self.label}' is read-only."
+        key_prefix = key_prefix.strip()
+        new_line = new_line.strip()
+        if not new_line:
+            return False, "new_line cannot be empty"
+        lines = [ln.strip() for ln in self.value.splitlines() if ln.strip()]
+        found = False
+        for i, ln in enumerate(lines):
+            if ln.startswith(key_prefix):
+                lines[i] = new_line
+                found = True
+                break
+        if not found:
+            lines.append(new_line)
+        new_value = "\n".join(lines)
+        if len(new_value) <= self.limit:
+            self.value = new_value
+            self.metadata["last_modified"] = datetime.now().isoformat()
+            return True, "Success"
+        return False, f"New content too large ({len(new_value)} > {self.limit})"
+
     def compile(self) -> str:
         readonly_tag = " [READ-ONLY]" if self.read_only else ""
         return f"""<{self.label}{readonly_tag}>
@@ -459,13 +488,20 @@ class RecallMemory(FAISSIndexMixin):
                 id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
                 role TEXT, content TEXT, tools_used TEXT, metadata TEXT, embedding BLOB)""")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_timestamp ON recall_memory(timestamp DESC)")
+            # Session/lesson scope: add column if missing (migration)
+            try:
+                conn.execute("ALTER TABLE recall_memory ADD COLUMN session_id TEXT")
+            except sqlite3.OperationalError:
+                pass  # column already exists
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_session_id ON recall_memory(session_id)")
 
-    def insert(self, role: str, content: str, tools_used: List[str] = None, metadata: Dict = None, defer_embedding: bool = False):
+    def insert(self, role: str, content: str, tools_used: List[str] = None, metadata: Dict = None, defer_embedding: bool = False, session_id: Optional[str] = None):
         """
         Insert a message into recall memory.
 
         Args:
             defer_embedding: If True, generates embedding in background thread (faster TTFT)
+            session_id: Optional lesson/session identifier for scope (e.g. "what did we learn today?")
         """
         # Use Python timestamp for microsecond precision
         timestamp = datetime.now().isoformat()
@@ -478,9 +514,10 @@ class RecallMemory(FAISSIndexMixin):
 
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute(
-                "INSERT INTO recall_memory (timestamp, role, content, tools_used, metadata, embedding) VALUES (?, ?, ?, ?, ?, ?)",
+                """INSERT INTO recall_memory (timestamp, role, content, tools_used, metadata, embedding, session_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
                 (timestamp, role, content, json.dumps(tools_used) if tools_used else None,
-                 json.dumps(metadata) if metadata else None, embedding)
+                 json.dumps(metadata) if metadata else None, embedding, session_id)
             )
             row_id = cursor.lastrowid
 
@@ -570,23 +607,54 @@ class RecallMemory(FAISSIndexMixin):
                     results.sort(key=lambda x: x[0], reverse=True)
                     return [{"role": r[1][2], "content": r[1][3], "timestamp": r[1][1]} for r in results[:limit]]
 
-            # Text search fallback
+            # Text search fallback (with recency weighting when query is set)
             if query:
+                fetch_limit = min(limit * 4, 200)
                 rows = conn.execute(
                     "SELECT role, content, timestamp FROM recall_memory WHERE content LIKE ? ORDER BY timestamp DESC LIMIT ?",
-                    (f"%{query}%", limit)
+                    (f"%{query}%", fetch_limit)
                 ).fetchall()
-            else:
-                rows = conn.execute(
-                    "SELECT role, content, timestamp FROM recall_memory ORDER BY timestamp DESC LIMIT ?",
-                    (limit,)
-                ).fetchall()
-
+                if rows:
+                    half_life = getattr(conf, "RECALL_RECENCY_HALFLIFE_SECONDS", 3600.0)
+                    now = datetime.now()
+                    query_terms = set(q.lower() for q in query.split() if len(q) > 1)
+                    scored = []
+                    for r in rows:
+                        role, content, ts = r[0], r[1], r[2]
+                        match_count = sum(1 for t in query_terms if t in content.lower()) if query_terms else 1
+                        match_score = min(1.0, match_count / max(1, len(query_terms)))
+                        age_seconds = 0.0
+                        if ts:
+                            try:
+                                t = datetime.fromisoformat(ts.replace("Z", "").split("+")[0])
+                                age_seconds = (now - t).total_seconds()
+                            except Exception:
+                                pass
+                        recency_score = math.exp(-age_seconds / half_life)
+                        combined = 0.5 * match_score + 0.5 * recency_score
+                        scored.append((combined, {"role": role, "content": content, "timestamp": ts}))
+                    scored.sort(key=lambda x: x[0], reverse=True)
+                    return [s[1] for s in scored[:limit]]
+                return []
+            rows = conn.execute(
+                "SELECT role, content, timestamp FROM recall_memory ORDER BY timestamp DESC LIMIT ?",
+                (limit,)
+            ).fetchall()
             return [{"role": r[0], "content": r[1], "timestamp": r[2]} for r in rows]
 
     def get_count(self) -> int:
         with sqlite3.connect(self.db_path) as conn:
             return conn.execute("SELECT COUNT(*) FROM recall_memory").fetchone()[0]
+
+    def get_recent_in_session(self, session_id: str, limit: int = 20) -> List[Dict]:
+        """Return the most recent messages in the given session (e.g. for 'what did we learn today?')."""
+        with sqlite3.connect(self.db_path) as conn:
+            rows = conn.execute(
+                """SELECT role, content, timestamp FROM recall_memory
+                   WHERE session_id = ? ORDER BY timestamp DESC LIMIT ?""",
+                (session_id, limit)
+            ).fetchall()
+        return [{"role": r[0], "content": r[1], "timestamp": r[2]} for r in rows]
 
     def compress_old_memories(self, summarizer_func: Callable[[str], str], archival_memory: 'ArchivalMemory', keep_recent: int = 50):
         """Summarizes old memories into archival storage before deletion."""
@@ -615,8 +683,13 @@ class RecallMemory(FAISSIndexMixin):
             # We strictly rely on timestamps to delete what we just fetched
             newest_of_old = rows[0][2] # The timestamp of the 'newest' item in the 'old' batch
             conn.execute("DELETE FROM recall_memory WHERE timestamp <= ?", (newest_of_old,))
-            
-            return len(rows)
+
+        # Keep FAISS index in sync: rebuild from current DB state after deletes
+        if self.faiss_manager and self.faiss_manager.is_available:
+            self.faiss_manager.rebuild_from_db(self.db_path, "recall_memory")
+            self.faiss_manager.save()
+
+        return len(rows)
 
 class ArchivalMemory(FAISSIndexMixin):
     """Archival Memory - Long term storage with FAISS search and importance decay"""
@@ -754,3 +827,92 @@ class ArchivalMemory(FAISSIndexMixin):
     def get_count(self) -> int:
         with sqlite3.connect(self.db_path) as conn:
             return conn.execute("SELECT COUNT(*) FROM archival_memory").fetchone()[0]
+
+
+# ---------------------------------------------------------------------------
+# Memory health checks and export (standalone helpers)
+# ---------------------------------------------------------------------------
+
+def memory_health_report(memory: Memory, recall: RecallMemory, archival: ArchivalMemory) -> Dict[str, Any]:
+    """
+    Lightweight diagnostics: human block still unknown, learned_words empty, DB readable.
+    Returns a dict with flags and counts for logging or UI.
+    """
+    report = {
+        "ok": True,
+        "human_still_unknown": False,
+        "learned_words_empty": False,
+        "recall_count": 0,
+        "archival_count": 0,
+        "user_message_count": 0,
+        "db_errors": [],
+    }
+    try:
+        report["recall_count"] = recall.get_count()
+        report["archival_count"] = archival.get_count()
+    except Exception as e:
+        report["ok"] = False
+        report["db_errors"].append(f"recall/archival: {e}")
+    try:
+        human = memory.get_block("human")
+        if human and "unknown" in human.value.lower():
+            report["human_still_unknown"] = True
+        learned = memory.get_block("learned_words")
+        if learned and not (learned.value or "").strip():
+            report["learned_words_empty"] = True
+    except Exception as e:
+        report["ok"] = False
+        report["db_errors"].append(f"core: {e}")
+    try:
+        with sqlite3.connect(recall.db_path) as conn:
+            report["user_message_count"] = conn.execute(
+                "SELECT COUNT(*) FROM recall_memory WHERE role = ?", ("user",)
+            ).fetchone()[0]
+    except Exception as e:
+        report["db_errors"].append(f"recall user count: {e}")
+    return report
+
+
+def export_memory_backup(
+    memory: Memory,
+    recall: RecallMemory,
+    archival: ArchivalMemory,
+    filepath: str,
+    recall_limit: int = 100,
+    archival_limit: int = 500,
+) -> None:
+    """
+    Export core blocks, last N recall messages, and up to M archival entries to a single JSON file.
+    """
+    out = {
+        "exported_at": datetime.now().isoformat(),
+        "core": {},
+        "recall": [],
+        "archival": [],
+    }
+    for b in memory.blocks:
+        out["core"][b.label] = {"value": b.value, "limit": b.limit, "description": b.description}
+    with sqlite3.connect(recall.db_path) as conn:
+        try:
+            rows = conn.execute(
+                "SELECT role, content, timestamp, session_id FROM recall_memory ORDER BY timestamp DESC LIMIT ?",
+                (recall_limit,),
+            ).fetchall()
+            for r in rows:
+                out["recall"].append({"role": r[0], "content": r[1], "timestamp": r[2], "session_id": r[3]})
+        except sqlite3.OperationalError:
+            rows = conn.execute(
+                "SELECT role, content, timestamp FROM recall_memory ORDER BY timestamp DESC LIMIT ?",
+                (recall_limit,),
+            ).fetchall()
+            for r in rows:
+                out["recall"].append({"role": r[0], "content": r[1], "timestamp": r[2], "session_id": None})
+    with sqlite3.connect(archival.db_path) as conn:
+        rows = conn.execute(
+            "SELECT category, content, importance, timestamp FROM archival_memory ORDER BY timestamp DESC LIMIT ?",
+            (archival_limit,),
+        ).fetchall()
+    for r in rows:
+        out["archival"].append({"category": r[0], "content": r[1], "importance": r[2], "timestamp": r[3]})
+    with open(filepath, "w", encoding="utf-8") as f:
+        json.dump(out, f, ensure_ascii=False, indent=2)

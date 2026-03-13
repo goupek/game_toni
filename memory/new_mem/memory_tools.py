@@ -6,8 +6,10 @@ send_message is intentionally NOT included here — it lives in communication_to
 so that the tool-routing logic in jhony_enhanced.py stays clean.
 """
 from typing import Dict, List, Any
+from datetime import datetime
 from memory_system import Memory, RecallMemory, ArchivalMemory
 from base_executor import BaseToolExecutor
+from config import conf
 
 
 def get_memory_tools() -> List[Dict]:
@@ -128,7 +130,7 @@ class MemoryToolExecutor(BaseToolExecutor):
         return f"Failed to save: {msg}"
 
     def _update_child_info(self, args: Dict) -> str:
-        """Replace outdated info in the human block."""
+        """Replace outdated info in the human block. Uses key-based update when applicable."""
         old = args.get("old_content", "").strip()
         new = args.get("new_content", "").strip()
         if not old or not new:
@@ -136,10 +138,17 @@ class MemoryToolExecutor(BaseToolExecutor):
         block = self.memory.get_block("human")
         if not block:
             return "Error: human block not found."
+        # Key-based replace only for single-line key "Child's name:" (no exact substring needed)
+        if old.startswith("Child's name:") and new.startswith("Child's name:"):
+            success, msg = block.replace_line_by_key("Child's name:", new)
+            if success:
+                self.memory.save()
+                return "Updated child info."
+            return f"Update failed: {msg}"
         success, msg = block.replace(old, new)
         if success:
             self.memory.save()
-            return f"Updated child info."
+            return "Updated child info."
         return f"Update failed: {msg}"
 
     def _record_learned_word(self, args: Dict) -> str:
@@ -159,10 +168,21 @@ class MemoryToolExecutor(BaseToolExecutor):
         if self.archival:
             self.archival.insert("vocabulary", entry, importance=9)
 
-        # 2. Compact entry in core memory for instant LLM visibility
+        # 2. Compact entry in core memory with line cap: drop oldest when over limit
         learned_block = self.memory.get_block("learned_words")
         if learned_block:
-            learned_block.append(f"\n{entry}" if learned_block.value else entry)
+            max_lines = getattr(conf, "LEARNED_WORDS_MAX_LINES", 80)
+            lines = [ln.strip() for ln in learned_block.value.splitlines() if ln.strip()]
+            if entry not in lines:
+                lines.append(entry)
+            if len(lines) > max_lines:
+                lines = lines[-max_lines:]
+            new_value = "\n".join(lines)
+            if len(new_value) <= learned_block.limit:
+                learned_block.value = new_value
+                learned_block.metadata["last_modified"] = datetime.now().isoformat()
+            else:
+                learned_block.append(f"\n{entry}" if learned_block.value else entry)
             self.memory.save()
 
         return f"Recorded: {entry}"

@@ -22,6 +22,12 @@ class Config:
     USE_SEMANTIC_SEARCH: bool = False
     RECALL_MEMORY_LIMIT: int = 40     # Compress to archival after this limit
 
+    # --- RAG Settings ---
+    RAG_RECALL_K: int = 3             # Max recall search results per query
+    RAG_ARCHIVAL_K: int = 3           # Max archival search results per query
+    RAG_LAST_N_TURNS: int = 4         # Always include this many recent messages as "last dialogue"
+    LEARNED_WORDS_MAX_LINES: int = 80 # Cap learned_words block; drop oldest when exceeded
+
     # --- FAISS Settings (Fast Vector Search) ---
     USE_FAISS: bool = True                       # Enable FAISS for O(log n) search
     FAISS_INDEX_PATH: str = "walle_faiss.index"  # Persistent index file
@@ -36,6 +42,8 @@ class Config:
     # --- Search Settings ---
     MAX_SEARCH_RESULTS: int = 5
     SEARCH_REGIONS: List[str] = field(default_factory=lambda: ["wt-wt", "us-en"])
+    # Recency half-life (seconds) for recall text search scoring; recent messages rank higher
+    RECALL_RECENCY_HALFLIFE_SECONDS: float = 3600.0  # 1 hour
 
     # --- Robot Settings ---
     SERIAL_PORT: str = None
