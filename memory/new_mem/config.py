@@ -45,6 +45,13 @@ class Config:
     # Recency half-life (seconds) for recall text search scoring; recent messages rank higher
     RECALL_RECENCY_HALFLIFE_SECONDS: float = 3600.0  # 1 hour
 
+    # --- Jhony mode: chat (friend) vs game (helper) ---
+    # "chat" = friend, conversational Russian teacher as before
+    # "game" = helper: Russian only, understands English from child, gives hints not answers
+    JHONY_MODE: str = "chat"
+    # In game mode: short description of current game/task for hint context (prompt-only)
+    CURRENT_GAME_HINT: str = ""
+
     # --- Robot Settings ---
     SERIAL_PORT: str = None
     BAUD_RATE: int = 9600

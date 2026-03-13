@@ -20,8 +20,10 @@ Session history stores ONLY:
 
 This keeps history clean, prevents confabulation, and fits within 1.5B token budget.
 """
+import argparse
 import json
 import re
+import sys
 import time
 from collections import deque
 from datetime import datetime
@@ -190,6 +192,14 @@ def format_last_turns(messages: list, max_messages: int) -> str:
 # ---------------------------------------------------------------------------
 
 def get_system_prompt() -> str:
+    mode = current_mode or getattr(conf, "JHONY_MODE", "chat")
+    if mode == "game":
+        return _get_game_mode_prompt()
+    return _get_chat_mode_prompt()
+
+
+def _get_chat_mode_prompt() -> str:
+    """Friend mode: conversational Russian teacher."""
     return f"""You are Jhony (Zhanibek), a warm Russian teacher for a young child.
 
 RULE 1 — RUSSIAN ONLY (most important):
@@ -202,6 +212,27 @@ RULE 2 — send_message IS YOUR ONLY VOICE:
 RULE 3 — SAVE WHAT YOU LEARN:
   Child shares name or interests? → call save_child_info first.
   NEVER invent facts. Only what is in <human> is real.
+
+{core_mem.compile()}"""
+
+
+def _get_game_mode_prompt() -> str:
+    """Helper mode: Russian only, understands English from child, hints only — never the answer."""
+    game_ctx = (current_game_hint or getattr(conf, "CURRENT_GAME_HINT", "") or "current activity").strip()
+    return f"""You are Jhony (Zhanibek), a helper during the child's game. You are NOT a teacher in this mode.
+
+RULE 1 — RUSSIAN ONLY:
+  send_message MUST be in Russian. Never English. Never Chinese. The child hears you in Russian.
+
+RULE 2 — YOU UNDERSTAND ENGLISH:
+  The child will speak mostly in English. Understand what they say and respond in Russian (short hint or encouragement).
+
+RULE 3 — HINTS ONLY, NEVER THE ANSWER:
+  Current game/task: {game_ctx}
+  Give small hints to help the child think (e.g. "Посмотри на цвет", "Сколько их?"). Do NOT say the answer or solution. One short sentence per turn (3-8 words).
+
+RULE 4 — send_message IS YOUR ONLY VOICE:
+  Call send_message every turn. The child cannot see your text.
 
 {core_mem.compile()}"""
 
@@ -315,6 +346,10 @@ class ChatSession:
 session = ChatSession()
 # Session/lesson scope: one ID per run for "what did we learn today?" style retrieval
 current_session_id: str = ""
+# Mode: "chat" = friend (conversational teacher), "game" = helper (hints only, Russian only)
+current_mode: str = ""
+# In game mode: current game/task description for hint context (prompt-only)
+current_game_hint: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -450,20 +485,24 @@ def chat(user_input: str) -> None:
 
         # Model called only memory tools — nudge it to speak on next iteration
         if iteration == 1:
-            working_messages.append({
-                "role": "system",
-                "content": "Хорошо. Теперь вызови send_message и ответь ребёнку по-русски (3-6 слов).",
-            })
+            mode = current_mode or getattr(conf, "JHONY_MODE", "chat")
+            if mode == "game":
+                nudge = "Хорошо. Вызови send_message: одна короткая подсказка по-русски. Не говори ответ."
+            else:
+                nudge = "Хорошо. Теперь вызови send_message и ответь ребёнку по-русски (3-6 слов)."
+            working_messages.append({"role": "system", "content": nudge})
 
     # ── Emergency fallback: bare text completion ───────────────────────────
     # Fires only when the loop produced nothing — rare, but covers model confusion.
     if not spoken_message:
+        mode = current_mode or getattr(conf, "JHONY_MODE", "chat")
+        fallback_prompt = "Дай короткую подсказку по-русски. Не говори ответ." if mode == "game" else "Ответь по-русски коротко (3-6 слов)."
         try:
             emer = client.chat.completions.create(
                 model=MODEL_NAME,
                 messages=working_messages + [{
                     "role": "user",
-                    "content": "Ответь по-русски коротко (3-6 слов).",
+                    "content": fallback_prompt,
                 }],
                 max_tokens=60,
             )
@@ -497,11 +536,44 @@ def chat(user_input: str) -> None:
 # Main loop
 # ---------------------------------------------------------------------------
 
+def _parse_args():
+    p = argparse.ArgumentParser(description="Jhony: Russian teacher / game helper for toddlers")
+    p.add_argument("--mode", choices=("chat", "game"), default=None, help="chat=friend, game=helper (hints only)")
+    p.add_argument("--game", type=str, default="", help="In game mode: short description of current game for hint context")
+    p.add_argument("--no-prompt", action="store_true", help="Use config defaults, do not prompt for mode/game")
+    return p.parse_args()
+
+
 def main() -> None:
-    global current_session_id
+    global current_session_id, current_mode, current_game_hint
+    args = _parse_args()
     current_session_id = datetime.now().strftime("%Y-%m-%d-%H%M")
-    print(f"🎓 Jhony (Zhanibek) Online — Ready to teach Russian!")
+    default_mode = getattr(conf, "JHONY_MODE", "chat")
+    if args.mode is not None:
+        current_mode = args.mode
+        current_game_hint = (args.game or getattr(conf, "CURRENT_GAME_HINT", "") or "").strip()
+    elif args.no_prompt:
+        current_mode = default_mode
+        current_game_hint = getattr(conf, "CURRENT_GAME_HINT", "") or ""
+    else:
+        try:
+            choice = input(f"Mode: [C]hat (friend) or [G]ame (helper)? (c/g) [{default_mode[0]}]: ").strip().lower() or default_mode[0]
+        except EOFError:
+            choice = default_mode[0]
+        current_mode = "game" if choice == "g" else "chat"
+        current_game_hint = getattr(conf, "CURRENT_GAME_HINT", "") or ""
+        if current_mode == "game":
+            try:
+                hint = input("Current game/task for hints? (optional, Enter to skip): ").strip()
+                if hint:
+                    current_game_hint = hint
+            except EOFError:
+                pass
+    print(f"🎓 Jhony (Zhanibek) Online — {'Helper (game mode)' if current_mode == 'game' else 'Ready to teach Russian (chat mode)'}!")
     print(f"   Model    : {MODEL_NAME}")
+    print(f"   Mode     : {current_mode}")
+    if current_mode == "game" and current_game_hint:
+        print(f"   Game     : {current_game_hint[:60]}{'...' if len(current_game_hint) > 60 else ''}")
     print(f"   Recall   : {recall_mem.get_count()} messages stored")
     print(f"   Archival : {archival_mem.get_count()} facts stored")
     learned = core_mem.get_block("learned_words")
