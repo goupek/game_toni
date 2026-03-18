@@ -43,6 +43,7 @@ import json
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from database.db_queries import save_level_game_history
+from database.db_queries import get_user_word_progress
 
 KNOWLEDGE_FILE = Path(__file__).resolve().parent / "word_knowledge.json"
 
@@ -163,6 +164,11 @@ for _count_data in GAME2_COUNTS.values():
         _RU_FORM_TO_EN[_form_val.lower()] = _count_data["en"]
 
 
+def load_progress_from_db():
+    rows = get_user_word_progress()
+    return rows
+
+
 def ru_form_to_en(ru_word: str) -> Optional[str]:
     """Return the English concept key for any Russian surface form, or None."""
     return _RU_FORM_TO_EN.get((ru_word or "").strip().lower())
@@ -171,12 +177,7 @@ def ru_form_to_en(ru_word: str) -> Optional[str]:
 # ── I/O ───────────────────────────────────────────────────────────────────────
 
 def load_knowledge() -> Dict[str, Any]:
-    if KNOWLEDGE_FILE.exists():
-        try:
-            return json.loads(KNOWLEDGE_FILE.read_text(encoding="utf-8"))
-        except Exception:
-            pass
-    return {"words": {}}
+    return {"db_rows": load_progress_from_db()}
 
 
 def save_knowledge(data: Dict[str, Any]) -> None:
