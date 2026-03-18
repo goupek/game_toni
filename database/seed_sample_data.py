@@ -13,9 +13,9 @@ def main():
     try:
         # user
         cursor.execute("""
-            INSERT INTO users (user_name, role)
-            VALUES (?, ?)
-        """, ("Test User", "student"))
+            INSERT INTO users (user_name)
+            VALUES (?)
+        """, ("Test User",))
         user_id = cursor.lastrowid
 
         # topics
