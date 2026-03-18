@@ -9,7 +9,8 @@ CREATE TABLE IF NOT EXISTS users (
 );
 
 CREATE TABLE IF NOT EXISTS topics (
-    topic_id TEXT PRIMARY KEY,
+    topic_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    topic_key TEXT NOT NULL UNIQUE,
     topic_name_ru TEXT NOT NULL
 );
 
@@ -17,7 +18,7 @@ CREATE TABLE IF NOT EXISTS words (
     word_id INTEGER PRIMARY KEY AUTOINCREMENT,
     lemma_rus TEXT NOT NULL,
     pos TEXT NOT NULL,
-    topic_id TEXT NOT NULL,
+    topic_id INTEGER NOT NULL,
     level TEXT CHECK (level IN ('A1', 'A2', 'B1', 'B2', 'C1', 'C2')),
     gender TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -103,6 +104,9 @@ CREATE TABLE IF NOT EXISTS game_events (
         ON DELETE SET NULL
         ON UPDATE CASCADE
 );
+
+CREATE INDEX IF NOT EXISTS idx_topics_topic_key
+ON topics(topic_key);
 
 CREATE INDEX IF NOT EXISTS idx_words_lemma_rus
 ON words(lemma_rus);
