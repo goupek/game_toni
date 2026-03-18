@@ -42,6 +42,7 @@ right concept even if the form is not the masculine base stored in vocab_db.
 import json
 from pathlib import Path
 from typing import Dict, Any, List, Optional
+from database.db_queries import save_level_game_history
 
 KNOWLEDGE_FILE = Path(__file__).resolve().parent / "word_knowledge.json"
 
@@ -290,6 +291,7 @@ def update_from_level_game(history: List[Dict], db_topics: List[Dict]) -> Dict[s
     _RU_FORM_TO_EN table maps it back to the same English concept "red" so
     knowledge is correctly updated.
     """
+    save_level_game_history(history)
     data  = load_knowledge()
     words = data.setdefault("words", {})
 
