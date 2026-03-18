@@ -36,7 +36,7 @@ from PIL import Image, ImageTk
 
 # ── local ─────────────────────────────────────────────────────────────────────
 from word_knowledge import update_from_level_game   # NEW
-
+from database.db_queries import get_topics_with_words
 # ─────────────────────────────────────────────────────────────────────────────
 # Constants  (unchanged from original)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -224,12 +224,7 @@ class ImprovedRussianGame:
 
         # Use the extended vocab (adds gender + forms) when available,
         # falling back to the original vocab_db in level/
-        _extended = _HERE / "vocab_db_extended.json"
-        self.db_path = db_path or (
-            str(_extended) if _extended.exists()
-            else str(_LEVEL / DEFAULT_DB_FILENAME)
-        )
-        self.db      = self.load_db(self.db_path)
+        self.db      = get_topics_with_words()
         self.topics  = self.build_topics_from_db(self.db)
         if not self.topics:
             raise RuntimeError("No topics found in DB. Check your JSON file structure.")
@@ -253,21 +248,6 @@ class ImprovedRussianGame:
             return False
 
     # ── DB ───────────────────────────────────────────────────────────────────
-
-    def load_db(self, path: str) -> Dict[str, Any]:
-        p = Path(path)
-        if not p.exists():
-            messagebox.showerror(
-                "DB not found",
-                f"Не найден файл словаря:\n{p}\n\n"
-                f"Создай файл {DEFAULT_DB_FILENAME} рядом со скриптом и вставь туда JSON.",
-            )
-            raise FileNotFoundError(str(p))
-        try:
-            return json.loads(p.read_text(encoding="utf-8"))
-        except Exception as e:
-            messagebox.showerror("DB error", f"Ошибка чтения JSON:\n{e}")
-            raise
 
     def build_topics_from_db(self, db: Dict[str, Any]) -> List[Dict[str, Any]]:
         palette = [
