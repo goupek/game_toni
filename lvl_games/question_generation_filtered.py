@@ -47,7 +47,6 @@ from question_generation import (
 )
 from word_knowledge import (
     GAME2_NOUNS,
-    ensure_game2_words_present,
     unknown_adj_keys,
     unknown_counts,
     noun_gender,

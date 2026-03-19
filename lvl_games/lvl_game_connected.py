@@ -41,8 +41,6 @@ from database.db_queries import get_topics_with_words
 # Constants  (unchanged from original)
 # ─────────────────────────────────────────────────────────────────────────────
 
-DEFAULT_DB_FILENAME = "vocab_db.json"
-
 TOPIC_ICON_BY_ID = {
     "family": "👪",
     "greetings": "👋",

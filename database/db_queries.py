@@ -1,7 +1,80 @@
 import sqlite3
+from collections import OrderedDict
 from pathlib import Path
 
-DB_PATH = Path(__file__).resolve().parent / "app.db"
+DB_PATH = Path(__file__).with_name("app.db")
+
+
+def get_connection():
+    return sqlite3.connect(DB_PATH)
+
+
+def get_topics_with_words():
+    conn = get_connection()
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT
+            t.topic_id,
+            t.topic_key,
+            t.topic_name_ru,
+            w.word_id,
+            w.lemma_rus,
+            w.pos,
+            w.level,
+            w.gender,
+            wt.word_eng,
+            wf.form_type,
+            wf.form_value
+        FROM topics t
+        JOIN words w
+            ON w.topic_id = t.topic_id
+        LEFT JOIN word_translations wt
+            ON wt.word_id = w.word_id
+        LEFT JOIN word_forms wf
+            ON wf.word_id = w.word_id
+        ORDER BY t.topic_id, w.word_id, wf.form_type
+    """)
+
+    rows = cur.fetchall()
+    conn.close()
+
+    topics_by_id = OrderedDict()
+    words_by_id = {}
+
+    for row in rows:
+        topic_id = row["topic_id"]
+        word_id = row["word_id"]
+
+        if topic_id not in topics_by_id:
+            topics_by_id[topic_id] = {
+                "id": row["topic_key"],
+                "name_ru": row["topic_name_ru"],
+                "words": []
+            }
+
+        if word_id not in words_by_id:
+            word_entry = {
+                "topic_id": topic_id,
+                "ru": row["lemma_rus"],
+                "en": row["word_eng"],
+                "pos": row["pos"],
+                "level": row["level"],
+                "gender": row["gender"],
+                "forms": {}
+            }
+            words_by_id[word_id] = word_entry
+            topics_by_id[topic_id]["words"].append(word_entry)
+
+        form_type = row["form_type"]
+        form_value = row["form_value"]
+
+        if form_type and form_value:
+            words_by_id[word_id]["forms"][form_type] = form_value
+
+    return {"topics": list(topics_by_id.values())}
+
 
 def get_words_by_topic_key(topic_key):
     conn = sqlite3.connect(DB_PATH)
@@ -26,57 +99,6 @@ def get_words_by_topic_key(topic_key):
 
     return [dict(row) for row in rows]
 
-def get_topics_with_words():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-
-    topic_rows = conn.execute("""
-        SELECT topic_id, topic_key, topic_name_ru
-        FROM topics
-        ORDER BY topic_id
-    """).fetchall()
-
-    out = []
-
-    for topic in topic_rows:
-        word_rows = conn.execute("""
-            SELECT
-                w.word_id,
-                w.lemma_rus,
-                w.pos,
-                w.level,
-                w.gender,
-                wt.word_eng AS translation_en
-            FROM words w
-            LEFT JOIN word_translations wt
-                ON w.word_id = wt.word_id
-            WHERE w.topic_id = ?
-            ORDER BY w.word_id
-        """, (topic["topic_id"],)).fetchall()
-
-        words = []
-        for row in word_rows:
-            ru = (row["lemma_rus"] or "").strip()
-            en = (row["translation_en"] or "").strip()
-            pos = (row["pos"] or "").strip()
-            level = (row["level"] or "A1").strip().upper()
-
-            if ru and en:
-                words.append({
-                    "ru": ru,
-                    "en": en,
-                    "pos": pos,
-                    "level": level
-                })
-
-        out.append({
-            "id": topic["topic_key"],
-            "name_ru": topic["topic_name_ru"],
-            "words": words
-        })
-
-    conn.close()
-    return {"topics": out}
 
 def get_word_id_by_ru_en(ru, en):
     conn = sqlite3.connect(DB_PATH)
@@ -92,6 +114,7 @@ def get_word_id_by_ru_en(ru, en):
 
     conn.close()
     return row["word_id"] if row else None
+
 
 def ensure_default_user():
     conn = sqlite3.connect(DB_PATH)
@@ -117,6 +140,7 @@ def ensure_default_user():
     conn.close()
     return user_id
 
+
 def upsert_user_word_progress(user_id, word_id, was_correct):
     conn = sqlite3.connect(DB_PATH)
 
@@ -131,6 +155,10 @@ def upsert_user_word_progress(user_id, word_id, was_correct):
                 total_attempts = total_attempts + 1,
                 total_correct = total_correct + 1,
                 correct_streak = correct_streak + 1,
+                status = CASE
+                    WHEN (correct_streak + 1) >= 3 THEN 'learned'
+                    ELSE 'learning'
+                END,
                 last_seen_at = CURRENT_TIMESTAMP,
                 updated_at = CURRENT_TIMESTAMP
         """, (user_id, word_id))
@@ -144,6 +172,7 @@ def upsert_user_word_progress(user_id, word_id, was_correct):
             ON CONFLICT(user_id, word_id) DO UPDATE SET
                 total_attempts = total_attempts + 1,
                 correct_streak = 0,
+                status = 'learning',
                 last_seen_at = CURRENT_TIMESTAMP,
                 updated_at = CURRENT_TIMESTAMP
         """, (user_id, word_id))
@@ -151,8 +180,27 @@ def upsert_user_word_progress(user_id, word_id, was_correct):
     conn.commit()
     conn.close()
 
+
 def save_level_game_history(history):
+    """
+    Save raw level-game attempts into game_events.
+
+    Does NOT update user_word_progress.
+    Progress updates are handled separately in update_from_level_game().
+    """
     user_id = ensure_default_user()
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+
+    # Ensure the game exists
+    cur.execute("SELECT game_id FROM games WHERE game_name = ?", ("level_game",))
+    row = cur.fetchone()
+
+    if row:
+        game_id = row[0]
+    else:
+        cur.execute("INSERT INTO games (game_name) VALUES (?)", ("level_game",))
+        game_id = cur.lastrowid
 
     for entry in history:
         direction = entry.get("direction", "")
@@ -170,10 +218,31 @@ def save_level_game_history(history):
             continue
 
         word_id = get_word_id_by_ru_en(ru, en)
-        if word_id is None:
-            continue
 
-        upsert_user_word_progress(user_id, word_id, ok)
+        cur.execute("""
+            INSERT INTO game_events (
+                user_id,
+                game_id,
+                word_id,
+                event_type,
+                is_correct,
+                used_hint,
+                attempt_number
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (
+            user_id,
+            game_id,
+            word_id,
+            "level_attempt",
+            1 if ok else 0,
+            0,
+            None,
+        ))
+
+    conn.commit()
+    conn.close()
+
 
 def get_user_word_progress(user_id=None):
     conn = sqlite3.connect(DB_PATH)

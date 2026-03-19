@@ -39,13 +39,15 @@ used in update_from_level_game() to map any tested Russian form back to the
 right concept even if the form is not the masculine base stored in vocab_db.
 """
 
+import sqlite3
 import json
 from pathlib import Path
 from typing import Dict, Any, List, Optional
-from database.db_queries import save_level_game_history
-from database.db_queries import get_user_word_progress
+from database.db_queries import save_level_game_history, get_user_word_progress, upsert_user_word_progress
 
 KNOWLEDGE_FILE = Path(__file__).resolve().parent / "word_knowledge.json"
+BASE_DIR = Path(__file__).resolve().parents[1]
+DB_PATH = BASE_DIR / "database" / "app.db"
 
 # ── Canonical game2 adjective vocabulary ─────────────────────────────────────
 # adj_key → { en, topic, ru_base, ru_forms{m,f,n,pl} }
@@ -164,278 +166,130 @@ for _count_data in GAME2_COUNTS.values():
         _RU_FORM_TO_EN[_form_val.lower()] = _count_data["en"]
 
 
-def load_progress_from_db():
+def load_progress_lookup() -> Dict[str, Dict[str, Any]]:
     rows = get_user_word_progress()
-    return rows
+    out: Dict[str, Dict[str, Any]] = {}
+
+    for row in rows:
+        en = (row.get("word_eng") or "").strip()
+        if en:
+            out[en] = row
+
+    return out
 
 
 def ru_form_to_en(ru_word: str) -> Optional[str]:
     """Return the English concept key for any Russian surface form, or None."""
     return _RU_FORM_TO_EN.get((ru_word or "").strip().lower())
 
-
-# ── I/O ───────────────────────────────────────────────────────────────────────
-
-def load_knowledge() -> Dict[str, Any]:
-    return {"db_rows": load_progress_from_db()}
-
-
-def save_knowledge(data: Dict[str, Any]) -> None:
-    KNOWLEDGE_FILE.write_text(
-        json.dumps(data, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-
-
-# ── Bootstrap game2 entries ───────────────────────────────────────────────────
-
-def ensure_game2_words_present() -> Dict[str, Any]:
-    """
-    Add any game2 vocabulary that is missing from word_knowledge.json,
-    including all grammatical forms and gender info.
-    Missing entries are created with known=None (never tested).
-    Returns the (possibly updated) knowledge dict.
-    """
-    data    = load_knowledge()
-    words   = data.setdefault("words", {})
-    changed = False
-
-    for _adj_key, adj in GAME2_ADJECTIVES.items():
-        en = adj["en"]
-        if en not in words:
-            words[en] = {
-                "known":    None,
-                "ru_base":  adj["ru_base"],
-                "ru_forms": adj["ru_forms"],
-                "topic":    adj["topic"],
-                "source":   "game2",
-            }
-            changed = True
-        else:
-            # Back-fill form data if an older entry lacks it
-            entry = words[en]
-            if "ru_forms" not in entry:
-                entry["ru_base"]  = adj["ru_base"]
-                entry["ru_forms"] = adj["ru_forms"]
-                changed = True
-
-    for _noun_key, noun in GAME2_NOUNS.items():
-        en = noun["en"]
-        if en not in words:
-            words[en] = {
-                "known":    None,
-                "ru_base":  noun["ru_forms"]["sg"],
-                "ru_forms": noun["ru_forms"],
-                "gender":   noun["gender"],
-                "topic":    noun["topic"],
-                "source":   "game2",
-            }
-            changed = True
-        else:
-            entry = words[en]
-            if "ru_forms" not in entry:
-                entry["ru_base"]  = noun["ru_forms"]["sg"]
-                entry["ru_forms"] = noun["ru_forms"]
-                entry["gender"]   = noun["gender"]
-                changed = True
-
-    for _count, cnt in GAME2_COUNTS.items():
-        en = cnt["en"]
-        if en not in words:
-            words[en] = {
-                "known":    None,
-                "ru_base":  cnt["ru_base"],
-                "ru_forms": cnt["ru_forms"],
-                "topic":    cnt["topic"],
-                "source":   "game2",
-            }
-            changed = True
-        else:
-            entry = words[en]
-            if "ru_forms" not in entry:
-                entry["ru_base"]  = cnt["ru_base"]
-                entry["ru_forms"] = cnt["ru_forms"]
-                changed = True
-
-    if changed:
-        save_knowledge(data)
-    return data
-
-
 # ── Update from level-game results ───────────────────────────────────────────
-
-def update_from_level_game(history: List[Dict], db_topics: List[Dict]) -> Dict[str, Any]:
+def update_from_level_game(history: List[Dict], db_topics: List[Dict], user_id: Optional[int] = None) -> Dict[str, Any]:
+    if user_id is None:
+        user_id = 1
     """
-    Persist knowledge results after the level-identification game finishes.
+    Persist level-game results into DB-backed user_word_progress.
 
-    Parameters
-    ----------
-    history   : answer records from ImprovedRussianGame.history
-                Each entry: {ok, direction, shown, correct, topic_id,
-                             word_level, difficulty}
-                direction "ru_to_en": shown=Russian, correct=English
-                direction "en_to_ru": shown=English, correct=Russian
-    db_topics : list of topic dicts loaded from vocab_db_extended.json
-
-    Behaviour
-    ---------
-    - Words answered CORRECTLY at least once  → known = True
-    - Words answered INCORRECTLY (all attempts) → known = False
-    - vocab_db words never asked              → known = False
-    - game2-only entries (source="game2")       kept as-is unless also
-      tested by the level game
-
-    Reverse lookup
-    --------------
-    If the level game tested a Russian word that is a declined/gendered form
-    of a game2 word (e.g., "красная" instead of base "красный"), the
-    _RU_FORM_TO_EN table maps it back to the same English concept "red" so
-    knowledge is correctly updated.
+    Important:
+    - Applies attempts in history order.
+    - This is required for the '3 correct in a row' learning rule.
+    - Words never asked are left untouched.
     """
     save_level_game_history(history)
-    data  = load_knowledge()
-    words = data.setdefault("words", {})
 
-    # Build topic lookup from vocab_db
-    ru_to_topic: Dict[str, str] = {}
-    en_to_topic: Dict[str, str] = {}
-    for t in db_topics:
-        for w in t.get("words", []):
-            if w.get("ru"):
-                ru_to_topic[w["ru"]] = t["id"]
-            if w.get("en"):
-                en_to_topic[w["en"]] = t["id"]
-            # Also index every form stored in the extended vocab
-            for form_val in w.get("forms", {}).values():
-                ru_to_topic[form_val] = t["id"]
-            for form_val in w.get("noun_forms", {}).values():
-                ru_to_topic[form_val] = t["id"]
+    # Build EN -> word_id lookup from DB
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT w.word_id, wt.word_eng
+        FROM words w
+        JOIN word_translations wt ON wt.word_id = w.word_id
+    """)
+    en_to_word_id: Dict[str, int] = {}
+    for word_id, word_eng in cur.fetchall():
+        if word_eng:
+            en_to_word_id[word_eng.strip()] = word_id
+    conn.close()
 
-    # Collect per-word result: en_key → {ok, ru, topic}
-    word_results: Dict[str, Dict] = {}
+    updated_attempts = 0
+    skipped_entries = []
 
     for entry in history:
-        direction = entry.get("direction", "")
-        shown     = (entry.get("shown")   or "").strip()
-        correct   = (entry.get("correct") or "").strip()
-        ok        = bool(entry.get("ok", False))
+        direction = (entry.get("direction") or "").strip()
+        shown = (entry.get("shown") or "").strip()
+        correct = (entry.get("correct") or "").strip()
+        ok = bool(entry.get("ok", False))
 
+        # Resolve the English key for the target concept
         if direction == "ru_to_en":
             en_key = correct
-            ru_val = shown
         elif direction == "en_to_ru":
             en_key = shown
-            ru_val = correct
         else:
+            skipped_entries.append({
+                "reason": "unknown_direction",
+                "entry": entry,
+            })
             continue
 
         if not en_key:
+            # fallback: if somehow Russian leaked through, try reverse map
+            en_key = _RU_FORM_TO_EN.get(correct.lower()) or _RU_FORM_TO_EN.get(shown.lower(), "")
+
+        word_id = en_to_word_id.get(en_key)
+        if not word_id:
+            skipped_entries.append({
+                "reason": "word_not_found",
+                "en_key": en_key,
+                "entry": entry,
+            })
             continue
 
-        # If the English key looks like a Russian word (vocab_db tested a
-        # non-base form as the "English" side), resolve via reverse lookup
-        if en_key.lower() in _RU_FORM_TO_EN:
-            en_key = _RU_FORM_TO_EN[en_key.lower()]
+        upsert_user_word_progress(user_id, word_id, ok)
+        updated_attempts += 1
 
-        # Also check if the Russian value maps to an already-known game2 concept
-        if not en_key and ru_val:
-            en_key = _RU_FORM_TO_EN.get(ru_val.lower(), "")
-
-        if not en_key:
-            continue
-
-        topic_id = en_to_topic.get(en_key) or ru_to_topic.get(ru_val, "unknown")
-
-        prev = word_results.get(en_key)
-        if prev is None:
-            word_results[en_key] = {"ok": ok, "ru": ru_val, "topic": topic_id}
-        else:
-            # known if correct at least once
-            word_results[en_key]["ok"] = prev["ok"] or ok
-
-    # Write results into the knowledge store
-    for en_key, result in word_results.items():
-        entry = words.get(en_key, {})
-        entry["known"]  = result["ok"]
-        entry["ru_base"] = entry.get("ru_base") or result["ru"]
-        entry["topic"]  = entry.get("topic") or result["topic"]
-        entry.setdefault("source", "vocab_db")
-        words[en_key] = entry
-
-    # Seed vocab_db words that were never asked as known=False
-    for t in db_topics:
-        for w in t.get("words", []):
-            en_key = w.get("en", "")
-            ru_val = w.get("ru", "")
-            if not en_key:
-                continue
-            if en_key not in words:
-                entry: Dict[str, Any] = {
-                    "known":   False,
-                    "ru_base": ru_val,
-                    "topic":   t["id"],
-                    "source":  "vocab_db",
-                }
-                # Attach form/gender metadata from extended vocab if present
-                if w.get("forms"):
-                    entry["ru_forms"] = w["forms"]
-                if w.get("noun_forms"):
-                    entry["ru_forms"] = w["noun_forms"]
-                if w.get("gender"):
-                    entry["gender"] = w["gender"]
-                words[en_key] = entry
-            else:
-                # Fill in missing metadata for existing entries
-                existing = words[en_key]
-                if existing.get("known") is None and existing.get("source") != "game2":
-                    existing["known"] = False
-                if "ru_forms" not in existing:
-                    if w.get("forms"):
-                        existing["ru_forms"] = w["forms"]
-                    elif w.get("noun_forms"):
-                        existing["ru_forms"] = w["noun_forms"]
-                if "gender" not in existing and w.get("gender"):
-                    existing["gender"] = w["gender"]
-
-    save_knowledge(data)
-    return data
-
+    return {
+        "updated_attempts": updated_attempts,
+        "skipped_entries": skipped_entries,
+    }
 
 # ── Query helpers ─────────────────────────────────────────────────────────────
-
-def is_known(en_key: str) -> bool:
-    """Return True only if the word has been explicitly marked as known."""
-    data  = load_knowledge()
-    entry = data["words"].get(en_key)
-    if entry is None:
-        return False
-    return entry.get("known") is True
 
 
 def unknown_adj_keys() -> List[str]:
     """
-    Return game2 adj_keys whose corresponding COLOR concept is NOT known.
-    An unknown word is one with known=False or known=None.
+    Return game2 adj_keys whose corresponding color concept is not yet learned.
+
+    A word is considered known only when its DB progress row has status == "learned".
+    Missing rows are treated as unknown.
     """
-    data  = load_knowledge()
-    words = data.get("words", {})
-    result = []
+    progress = load_progress_lookup()
+    result: List[str] = []
+
     for adj_key, adj in GAME2_ADJECTIVES.items():
-        entry = words.get(adj["en"])
-        if entry is None or entry.get("known") is not True:
+        row = progress.get(adj["en"])
+
+        if row is None or str(row.get("status", "")).strip().lower() != "learned":
             result.append(adj_key)
+
     return result
 
 
-def unknown_counts() -> List[int]:
-    """Return count integers (1-4) whose number word is NOT known."""
-    data  = load_knowledge()
-    words = data.get("words", {})
-    result = []
-    for count, cnt in GAME2_COUNTS.items():
-        entry = words.get(cnt["en"])
-        if entry is None or entry.get("known") is not True:
-            result.append(count)
+def unknown_counts() -> List[str]:
+    """
+    Return game2 count keys whose English concept is not yet learned.
+
+    A count is considered known only when its DB progress row has
+    status == "learned". Missing rows are treated as unknown.
+    """
+    progress = load_progress_lookup()
+    result: List[str] = []
+
+    for count_key, count_data in GAME2_COUNTS.items():
+        row = progress.get(count_data["en"])
+
+        if row is None or str(row.get("status", "")).strip().lower() != "learned":
+            result.append(count_key)
+
     return result
 
 

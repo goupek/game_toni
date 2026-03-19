@@ -33,7 +33,6 @@ for p in [str(_HERE), str(_ROOT)]:
 import pygame
 
 from question_generation_filtered import generate_round_filtered   # NEW (replaces generate_round)
-from word_knowledge import ensure_game2_words_present              # NEW
 from image_utils import build_round_surface
 
 # -----------------------------
@@ -769,9 +768,6 @@ def finish_screen(screen, ui, score, total):
 # APP
 # -----------------------------
 def main():
-    # NEW: register game2 vocabulary in word_knowledge.json if not present yet
-    ensure_game2_words_present()
-
     pygame.init()
     pygame.mixer.init()
 
