@@ -164,10 +164,10 @@ TTS_FILES = {
     "pink_n.wav":    "розовое",
     "pink_pl.wav":   "розовые",
 
-    "grey_m.wav":    "серый",
-    "grey_f.wav":    "серая",
-    "grey_n.wav":    "серое",
-    "grey_pl.wav":   "серые",
+    "gray_m.wav":    "серый",
+    "gray_f.wav":    "серая",
+    "gray_n.wav":    "серое",
+    "gray_pl.wav":   "серые",
 
     "brown_m.wav":   "коричневый",
     "brown_f.wav":   "коричневая",

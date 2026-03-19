@@ -269,3 +269,161 @@ def get_user_word_progress(user_id=None):
 
     conn.close()
     return [dict(row) for row in rows]
+
+
+def get_game2_vocab_by_manifest(manifest):
+    """
+    Build NOUNS, ADJECTIVES, NUM_WORD dicts from DB for only enabled words.
+    
+    If a form is missing in DB, uses the base form as fallback.
+    Logs warnings for any missing forms but continues loading.
+    
+    Args:
+        manifest: dict with keys "nouns", "adjectives", "numbers" containing enabled keys.
+    
+    Returns:
+        dict with keys "nouns", "adjectives", "numbers" containing full structures.
+    """
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    
+    result = {
+        "nouns": {},
+        "adjectives": {},
+        "numbers": {},
+    }
+    
+    try:
+        # ── Nouns ──────────────────────────────────────────────────────
+        noun_keys = manifest.get("nouns", set())
+        for noun_key in noun_keys:
+            row = conn.execute("""
+                SELECT w.word_id, w.lemma_rus, w.gender
+                FROM words w
+                JOIN word_translations wt ON wt.word_id = w.word_id
+                WHERE lower(wt.word_eng) = lower(?)
+                    AND w.pos = 'noun'
+                LIMIT 1
+            """, (noun_key,)).fetchone()
+            
+            if not row:
+                print(f"[WARN] Noun '{noun_key}' not found in DB, skipping")
+                continue
+            
+            word_id = row["word_id"]
+            base_form = row["lemma_rus"]
+            
+            # Get forms
+            forms_rows = conn.execute(
+                "SELECT form_type, form_value FROM word_forms WHERE word_id = ?",
+                (word_id,),
+            ).fetchall()
+            
+            forms_dict = {r["form_type"]: r["form_value"] for r in forms_rows}
+            required_forms = {"sg", "pl", "gen_pl"}
+            missing = required_forms - set(forms_dict.keys())
+            
+            if missing:
+                print(f"[WARN] Noun '{noun_key}' missing forms {missing}, using base form as fallback")
+                for form_type in missing:
+                    forms_dict[form_type] = base_form
+            
+            result["nouns"][noun_key] = {
+                "sg": forms_dict.get("sg", base_form),
+                "pl": forms_dict.get("pl", base_form),
+                "gen_pl": forms_dict.get("gen_pl", base_form),
+                "gender": row["gender"],
+            }
+        
+        # ── Adjectives ─────────────────────────────────────────────────
+        adj_keys = manifest.get("adjectives", set())
+        for adj_key in adj_keys:
+            row = conn.execute("""
+                SELECT w.word_id, w.lemma_rus
+                FROM words w
+                JOIN word_translations wt ON wt.word_id = w.word_id
+                WHERE lower(wt.word_eng) = lower(?)
+                    AND w.pos = 'adj'
+                LIMIT 1
+            """, (adj_key,)).fetchone()
+            
+            if not row:
+                print(f"[WARN] Adjective '{adj_key}' not found in DB, skipping")
+                continue
+            
+            word_id = row["word_id"]
+            base_form = row["lemma_rus"]
+            
+            # Get forms
+            forms_rows = conn.execute(
+                "SELECT form_type, form_value FROM word_forms WHERE word_id = ?",
+                (word_id,),
+            ).fetchall()
+            
+            forms_dict = {r["form_type"]: r["form_value"] for r in forms_rows}
+            required_forms = {"m", "f", "n", "pl"}
+            missing = required_forms - set(forms_dict.keys())
+            
+            if missing:
+                print(f"[WARN] Adjective '{adj_key}' missing forms {missing}, using base form as fallback")
+                for form_type in missing:
+                    forms_dict[form_type] = base_form
+            
+            result["adjectives"][adj_key] = {
+                "m": forms_dict.get("m", base_form),
+                "f": forms_dict.get("f", base_form),
+                "n": forms_dict.get("n", base_form),
+                "pl": forms_dict.get("pl", base_form),
+            }
+        
+        # ── Numbers ────────────────────────────────────────────────────
+        num_keys = manifest.get("numbers", set())
+        number_en_map = {1: "one", 2: "two", 3: "three", 4: "four", 5: "five"}
+        
+        for num_key in num_keys:
+            en_label = number_en_map.get(num_key)
+            if not en_label:
+                print(f"[WARN] Number {num_key} not in supported range (1-5), skipping")
+                continue
+            
+            row = conn.execute("""
+                SELECT w.word_id, w.lemma_rus
+                FROM words w
+                JOIN word_translations wt ON wt.word_id = w.word_id
+                WHERE lower(wt.word_eng) = lower(?)
+                    AND w.pos = 'num'
+                LIMIT 1
+            """, (en_label,)).fetchone()
+            
+            if not row:
+                print(f"[WARN] Number '{en_label}' (key={num_key}) not found in DB, skipping")
+                continue
+            
+            word_id = row["word_id"]
+            base_form = row["lemma_rus"]
+            
+            # Get forms
+            forms_rows = conn.execute(
+                "SELECT form_type, form_value FROM word_forms WHERE word_id = ?",
+                (word_id,),
+            ).fetchall()
+            
+            forms_dict = {r["form_type"]: r["form_value"] for r in forms_rows}
+            required_forms = {"m", "f", "n"}
+            missing = required_forms - set(forms_dict.keys())
+            
+            if missing:
+                print(f"[WARN] Number {num_key} missing forms {missing}, using base form as fallback")
+                for form_type in missing:
+                    forms_dict[form_type] = base_form
+            
+            result["numbers"][num_key] = {
+                "m": forms_dict.get("m", base_form),
+                "f": forms_dict.get("f", base_form),
+                "n": forms_dict.get("n", base_form),
+            }
+    
+    finally:
+        conn.close()
+    
+    return result

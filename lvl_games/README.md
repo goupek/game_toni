@@ -47,22 +47,22 @@ is treated as unknown so the game plays normally.
 
 ### `word_knowledge.py`
 
-Central module used by both games.  Never run directly.
+Central module used by both games. Never run directly.
 
 **Key public API**
 
-| Symbol | Type | Description |
-|---|---|---|
-| `GAME2_ADJECTIVES` | dict | Adj-key → `{en, topic, ru_base, ru_forms{m,f,n,pl}}` |
-| `GAME2_NOUNS` | dict | Noun-key → `{en, topic, gender, ru_forms{sg,pl,gen_pl}}` |
-| `GAME2_COUNTS` | dict | Count int → `{en, topic, ru_base, ru_forms}` |
-| `_RU_FORM_TO_EN` | dict | Any Russian surface form → English concept key (built at import) |
-| `ru_form_to_en(ru)` | fn | Look up the English concept for any Russian form |
-| `ensure_game2_words_present()` | fn | Add missing game2 words to `word_knowledge.json` (called on startup) |
-| `update_from_level_game(history, db_topics)` | fn | Persist known/unknown after level game ends |
-| `unknown_adj_keys()` | fn | Returns adj-keys not yet known (used by filtered generator) |
-| `unknown_counts()` | fn | Returns count integers not yet known |
-| `noun_gender(noun_key)` | fn | Returns grammatical gender ("m"/"f"/"n") for a game2 noun |
+| Symbol                                       | Type | Description                                                          |
+| -------------------------------------------- | ---- | -------------------------------------------------------------------- |
+| `GAME2_ADJECTIVES`                           | dict | Adj-key → `{en, topic, ru_base, ru_forms{m,f,n,pl}}`                 |
+| `GAME2_NOUNS`                                | dict | Noun-key → `{en, topic, gender, ru_forms{sg,pl,gen_pl}}`             |
+| `GAME2_COUNTS`                               | dict | Count int → `{en, topic, ru_base, ru_forms}`                         |
+| `_RU_FORM_TO_EN`                             | dict | Any Russian surface form → English concept key (built at import)     |
+| `ru_form_to_en(ru)`                          | fn   | Look up the English concept for any Russian form                     |
+| `ensure_game2_words_present()`               | fn   | Add missing game2 words to `word_knowledge.json` (called on startup) |
+| `update_from_level_game(history, db_topics)` | fn   | Persist known/unknown after level game ends                          |
+| `unknown_adj_keys()`                         | fn   | Returns adj-keys not yet known (used by filtered generator)          |
+| `unknown_counts()`                           | fn   | Returns count integers not yet known                                 |
+| `noun_gender(noun_key)`                      | fn   | Returns grammatical gender ("m"/"f"/"n") for a game2 noun            |
 
 **`word_knowledge.json` schema**
 
@@ -70,28 +70,33 @@ Central module used by both games.  Never run directly.
 {
   "words": {
     "red": {
-      "known":    true,
-      "ru_base":  "красный",
-      "ru_forms": { "m": "красный", "f": "красная", "n": "красное", "pl": "красные" },
-      "topic":    "colors",
-      "source":   "game2"
+      "known": true,
+      "ru_base": "красный",
+      "ru_forms": {
+        "m": "красный",
+        "f": "красная",
+        "n": "красное",
+        "pl": "красные"
+      },
+      "topic": "colors",
+      "source": "game2"
     },
     "one": {
-      "known":    null,
-      "ru_base":  "один",
+      "known": null,
+      "ru_base": "один",
       "ru_forms": { "m": "один", "f": "одна", "n": "одно" },
-      "topic":    "numbers",
-      "source":   "game2"
+      "topic": "numbers",
+      "source": "game2"
     }
   }
 }
 ```
 
-| `known` value | Meaning |
-|---|---|
-| `true` | Answered correctly at least once in the level game |
-| `false` | Answered incorrectly, or present in vocab but never asked |
-| `null` | Registered from game2 startup; not yet tested by the level game |
+| `known` value | Meaning                                                         |
+| ------------- | --------------------------------------------------------------- |
+| `true`        | Answered correctly at least once in the level game              |
+| `false`       | Answered incorrectly, or present in vocab but never asked       |
+| `null`        | Registered from game2 startup; not yet tested by the level game |
 
 Words with `known: false` or `known: null` are treated as **unknown** by game2.
 
@@ -99,19 +104,19 @@ Words with `known: false` or `known: null` are treated as **unknown** by game2.
 
 ### `vocab_db_extended.json`
 
-Extended version of `level/vocab_db.json`.  Adds three new optional fields
+Extended version of `level/vocab_db.json`. Adds three new optional fields
 to every entry where applicable:
 
-| Field | Applies to | Content |
-|---|---|---|
-| `"gender"` | all nouns | `"m"` / `"f"` / `"n"` / `"pl"` / `"indecl"` |
-| `"forms"` | adjectives & numbers 1–2 | `{ "m", "f", "n", "pl" }` or `{ "m", "f", "n" }` |
-| `"noun_forms"` | game2 nouns (мяч, собака, кошка, машина) | `{ "sg", "pl", "gen_pl" }` |
+| Field          | Applies to                               | Content                                          |
+| -------------- | ---------------------------------------- | ------------------------------------------------ |
+| `"gender"`     | all nouns                                | `"m"` / `"f"` / `"n"` / `"pl"` / `"indecl"`      |
+| `"forms"`      | adjectives & numbers 1–2                 | `{ "m", "f", "n", "pl" }` or `{ "m", "f", "n" }` |
+| `"noun_forms"` | game2 nouns (мяч, собака, кошка, машина) | `{ "sg", "pl", "gen_pl" }`                       |
 
 Numbers 3 and above carry `"forms": { "all": "три" }` (no gender distinction).  
 Verbs, interjections, and fixed phrases carry no extra fields.
 
-This file is used by `lvl_game_connected.py` automatically.  The original
+This file is used by `lvl_game_connected.py` automatically. The original
 `level/vocab_db.json` is **not modified**.
 
 ---
@@ -154,10 +159,10 @@ generate_round_filtered(option_count=3, max_count=4) -> dict
 
 **Filtering logic**
 
-| Question type | Filtered by |
-|---|---|
-| `"color"` | Only adj-keys returned by `unknown_adj_keys()` |
-| `"count"` | Only count integers returned by `unknown_counts()` |
+| Question type | Filtered by                                        |
+| ------------- | -------------------------------------------------- |
+| `"color"`     | Only adj-keys returned by `unknown_adj_keys()`     |
+| `"count"`     | Only count integers returned by `unknown_counts()` |
 
 If one category is fully known its question type is skipped.  
 If **both** categories are fully known, falls back to the original
@@ -197,36 +202,36 @@ menu / finish screens — is identical to the original.
 
 ### Colour adjectives (game2 uses these as answers)
 
-| English | Masculine | Feminine | Neuter | Plural |
-|---|---|---|---|---|
-| red | красный | красная | красное | красные |
-| blue | синий | синяя | синее | синие |
-| light blue | голубой | голубая | голубое | голубые |
-| green | зелёный | зелёная | зелёное | зелёные |
-| white | белый | белая | белое | белые |
-| yellow | жёлтый | жёлтая | жёлтое | жёлтые |
-| purple | фиолетовый | фиолетовая | фиолетовое | фиолетовые |
-| pink | розовый | розовая | розовое | розовые |
-| grey | серый | серая | серое | серые |
-| brown | коричневый | коричневая | коричневое | коричневые |
+| English    | Masculine  | Feminine   | Neuter     | Plural     |
+| ---------- | ---------- | ---------- | ---------- | ---------- |
+| red        | красный    | красная    | красное    | красные    |
+| blue       | синий      | синяя      | синее      | синие      |
+| light blue | голубой    | голубая    | голубое    | голубые    |
+| green      | зелёный    | зелёная    | зелёное    | зелёные    |
+| white      | белый      | белая      | белое      | белые      |
+| yellow     | жёлтый     | жёлтая     | жёлтое     | жёлтые     |
+| purple     | фиолетовый | фиолетовая | фиолетовое | фиолетовые |
+| pink       | розовый    | розовая    | розовое    | розовые    |
+| gray       | серый      | серая      | серое      | серые      |
+| brown      | коричневый | коричневая | коричневое | коричневые |
 
 ### Numbers 1–4 (game2 uses these as answers)
 
 | English | Masculine | Feminine | Neuter |
-|---|---|---|---|
-| one | один | одна | одно |
-| two | два | две | два |
-| three | три | три | три |
-| four | четыре | четыре | четыре |
+| ------- | --------- | -------- | ------ |
+| one     | один      | одна     | одно   |
+| two     | два       | две      | два    |
+| three   | три       | три      | три    |
+| four    | четыре    | четыре   | четыре |
 
 ### Game2 nouns (appear in question text, not as answers)
 
 | English | Gender | Singular | Plural | Genitive plural |
-|---|---|---|---|---|
-| dog | f | собака | собаки | собак |
-| cat | f | кошка | кошки | кошек |
-| car | f | машина | машины | машин |
-| ball | m | мяч | мячи | мячей |
+| ------- | ------ | -------- | ------ | --------------- |
+| dog     | f      | собака   | собаки | собак           |
+| cat     | f      | кошка    | кошки  | кошек           |
+| car     | f      | машина   | машины | машин           |
+| ball    | m      | мяч      | мячи   | мячей           |
 
 The noun gender determines which adjective / numeral form is chosen as the
 correct answer (see Grammar handling above).

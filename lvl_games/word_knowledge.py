@@ -93,8 +93,8 @@ GAME2_ADJECTIVES: Dict[str, Dict[str, Any]] = {
         "ru_base": "розовый",
         "ru_forms": {"m": "розовый",    "f": "розовая",    "n": "розовое",    "pl": "розовые"},
     },
-    "grey": {
-        "en": "grey",       "topic": "colors",
+    "gray": {
+        "en": "gray",       "topic": "colors",
         "ru_base": "серый",
         "ru_forms": {"m": "серый",      "f": "серая",      "n": "серое",      "pl": "серые"},
     },
