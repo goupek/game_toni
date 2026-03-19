@@ -12,7 +12,6 @@ for p in [str(_HERE), str(_LEVEL), str(_ROOT)]:
 
 import sqlite3
 
-from database.db_queries import get_topics_with_words
 from lvl_games.word_knowledge import update_from_level_game
 
 DB_PATH = Path(__file__).resolve().parent / "app.db"
@@ -86,15 +85,13 @@ def test_three_correct_in_a_row():
     reset_progress()
     print_progress("Before")
 
-    db_topics = get_topics_with_words()["topics"]
-
     fake_history = [
         {"direction": "ru_to_en", "shown": "синий", "correct": "blue", "ok": True},
         {"direction": "ru_to_en", "shown": "синий", "correct": "blue", "ok": True},
         {"direction": "ru_to_en", "shown": "синий", "correct": "blue", "ok": True},
     ]
 
-    result = update_from_level_game(fake_history, db_topics, user_id=USER_ID)
+    result = update_from_level_game(fake_history, user_id=USER_ID)
     print("update_from_level_game result:", result)
     print_progress("After")
 
@@ -128,15 +125,13 @@ def test_broken_streak():
     reset_progress()
     print_progress("Before")
 
-    db_topics = get_topics_with_words()["topics"]
-
     fake_history = [
         {"direction": "ru_to_en", "shown": "синий", "correct": "blue", "ok": True},
         {"direction": "ru_to_en", "shown": "синий", "correct": "blue", "ok": False},
         {"direction": "ru_to_en", "shown": "синий", "correct": "blue", "ok": True},
     ]
 
-    result = update_from_level_game(fake_history, db_topics, user_id=USER_ID)
+    result = update_from_level_game(fake_history, user_id=USER_ID)
     print("update_from_level_game result:", result)
     print_progress("After")
 

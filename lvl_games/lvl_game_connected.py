@@ -583,9 +583,8 @@ class ImprovedRussianGame:
 
         # ── persist word knowledge ─────────────────────────────────────────────
         try:
-            db_topics = self.db.get("topics", [])
-            update_from_level_game(self.history, db_topics)
-            knowledge_note = f"\n\n💾 Results saved to\n{_HERE / 'word_knowledge.json'}"
+            update_from_level_game(self.history)
+            knowledge_note = "\n\n💾 Results saved to database"
         except Exception as exc:
             knowledge_note = f"\n\n⚠️ Could not save results: {exc}"
 

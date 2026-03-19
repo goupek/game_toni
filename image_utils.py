@@ -1,6 +1,5 @@
 import pygame
 import os
-import sys
 
 TEMPLATE_FILES = {
     "ball": "ball_template.png",
@@ -56,6 +55,15 @@ def sprite_centers_for_count(count, area_rect):
             (x_75, y_75),
         ]
 
+    # 5: 4 corners + 1 center
+    return [
+        (x_25, y_25),
+        (x_75, y_25),
+        (x_50, y_50),
+        (x_25, y_75),
+        (x_75, y_75),
+    ]
+
 def sprite_size_for_count(count, W, H):
     S = min(W, H)  # square side reference
 
@@ -67,6 +75,8 @@ def sprite_size_for_count(count, W, H):
         a = int(S * 0.42)
     elif count == 4:
         a = int(S * 0.38)
+    else:  # 5+
+        a = int(S * 0.32)
     return (a, a)
     
 def compose_sprites_on_canvas(sprite, count, canvas_size):
@@ -138,28 +148,3 @@ def recolor_template(surface, main_rgb):
 
     del px  # unlock surface
     return out
-
-# pygame.init()
-# screen = pygame.display.set_mode((500, 500))
-# pygame.display.set_caption("Recolor Test")
-
-# # Load template
-# dog = pygame.image.load("dog_template.png").convert()
-
-# # Recolor to blue
-# BLUE = (70, 130, 240)
-# dog_blue = recolor_template(dog, BLUE)
-# scaled = pygame.transform.smoothscale(dog_blue, (256, 256))
-
-# running = True
-# while running:
-#     for event in pygame.event.get():
-#         if event.type == pygame.QUIT:
-#             running = False
-
-#     screen.fill((240, 240, 240))
-#     screen.blit(scaled, (200, 100))
-#     pygame.display.flip()
-
-# pygame.quit()
-# sys.exit()

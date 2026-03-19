@@ -1,8 +1,33 @@
 import pyttsx3
 import os
+from question_generation import NOUNS, ADJECTIVES, NUM_WORD
 
-# filename -> text
-files = {'1_m.wav': 'один', '1_f.wav': 'одна', '1_n.wav': 'одно', '2_m.wav': 'два', '2_f.wav': 'две', '2_n.wav': 'два', '3.wav': 'три', '4.wav': 'четыре', '5.wav': 'пять', 'dog_sg.wav': 'собака', 'dog_pl.wav': 'собаки', 'dog_gen_pl.wav': 'собак', 'cat_sg.wav': 'кошка', 'cat_pl.wav': 'кошки', 'cat_gen_pl.wav': 'кошек', 'car_sg.wav': 'машина', 'car_pl.wav': 'машины', 'car_gen_pl.wav': 'машин', 'ball_sg.wav': 'мяч', 'ball_pl.wav': 'мячи', 'ball_gen_pl.wav': 'мячей', 'red_m.wav': 'красный', 'red_f.wav': 'красная', 'red_n.wav': 'красное', 'red_pl.wav': 'красные', 'blue_m.wav': 'синий', 'blue_f.wav': 'синяя', 'blue_n.wav': 'синее', 'blue_pl.wav': 'синие', 'light_blue_m.wav': 'голубой', 'light_blue_f.wav': 'голубая', 'light_blue_n.wav': 'голубое', 'light_blue_pl.wav': 'голубые', 'green_m.wav': 'зелёный', 'green_f.wav': 'зелёная', 'green_n.wav': 'зелёное', 'green_pl.wav': 'зелёные', 'white_m.wav': 'белый', 'white_f.wav': 'белая', 'white_n.wav': 'белое', 'white_pl.wav': 'белые', 'yellow_m.wav': 'жёлтый', 'yellow_f.wav': 'жёлтая', 'yellow_n.wav': 'жёлтое', 'yellow_pl.wav': 'жёлтые', 'purple_m.wav': 'фиолетовый', 'purple_f.wav': 'фиолетовая', 'purple_n.wav': 'фиолетовое', 'purple_pl.wav': 'фиолетовые', 'pink_m.wav': 'розовый', 'pink_f.wav': 'розовая', 'pink_n.wav': 'розовое', 'pink_pl.wav': 'розовые', 'gray_m.wav': 'серый', 'gray_f.wav': 'серая', 'gray_n.wav': 'серое', 'gray_pl.wav': 'серые', 'brown_m.wav': 'коричневый', 'brown_f.wav': 'коричневая', 'brown_n.wav': 'коричневое', 'brown_pl.wav': 'коричневые', 'q_color.wav': 'Какого цвета', 'q_count.wav': 'Сколько', 'q_tail.wav': 'на картинке?'}
+# Build filename → text mapping from DB-backed vocab
+files = {}
+
+for noun_key, forms in NOUNS.items():
+    for form_type, form_value in forms.items():
+        if form_type != "gender":
+            files[f"{noun_key}_{form_type}.wav"] = form_value
+
+for adj_key, forms in ADJECTIVES.items():
+    adj_filename = adj_key.replace(" ", "_")
+    for gender, form_value in forms.items():
+        files[f"{adj_filename}_{gender}.wav"] = form_value
+
+for num_key, forms in NUM_WORD.items():
+    values = list(forms.values())
+    if len(set(values)) == 1:
+        files[f"{num_key}.wav"] = values[0]
+    else:
+        for gender, form_value in forms.items():
+            files[f"{num_key}_{gender}.wav"] = form_value
+
+files.update({
+    "q_color.wav": "Какого цвета",
+    "q_count.wav": "Сколько",
+    "q_tail.wav":  "на картинке?",
+})
 
 OUT_DIR = "tts_out"  # change if you want
 os.makedirs(OUT_DIR, exist_ok=True)
