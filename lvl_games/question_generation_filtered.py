@@ -52,15 +52,6 @@ from word_knowledge import (
     noun_gender,
 )
 
-_bootstrapped = False
-
-
-def _bootstrap_once() -> None:
-    global _bootstrapped
-    if not _bootstrapped:
-        ensure_game2_words_present()
-        _bootstrapped = True
-
 
 # ── sanity-check: GAME2_NOUNS genders must match question_generation.NOUNS ──
 def _assert_gender_consistency() -> None:
@@ -90,7 +81,6 @@ def generate_round_filtered(option_count: int = 3, max_count: int = 4) -> dict:
     ---------------
     qtype, noun_key, count, adj_key, rgb, prompt_text, options, correct
     """
-    _bootstrap_once()
 
     unk_adjs   = unknown_adj_keys()   # e.g. ["blue", "green", "brown", …]
     unk_counts = unknown_counts()     # e.g. [1, 2, 4]
