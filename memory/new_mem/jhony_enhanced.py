@@ -62,6 +62,11 @@ _DONT_LIKE_RE = re.compile(r"\bi don'?t like\s+([^,.!?\n]{3,40})", re.IGNORECASE
 _HAVE_RE     = re.compile(r'\bi have (?:a |an )?([A-Za-z]+(?: [A-Za-z]+)?)\b', re.IGNORECASE)
 _FAMILY_RE   = re.compile(r'\bmy (mom|mother|dad|father|sister|brother|grandma|grandpa)\s+(?:is\s+)?([^,.!?\n]{2,40})', re.IGNORECASE)
 _AGE_RE      = re.compile(r"\bI'?m\s+(\d{1,2})\s*years?\s*old\b", re.IGNORECASE)
+_BULLY_RE    = re.compile(r"\b(people|they|someone)\s+(bully|bullies|bullied|bullying)\s+me\b|\bbullied\b", re.IGNORECASE)
+_EMOTION_RE  = re.compile(
+    r"\b(i am|i'm|i feel|im)\s+(sad|upset|angry|hurt|scared|afraid|worried)\b",
+    re.IGNORECASE,
+)
 
 
 def auto_extract_facts(user_input: str) -> None:
@@ -124,6 +129,18 @@ def auto_extract_facts(user_input: str) -> None:
     if m:
         age = m.group(1)
         entry = f"Child age: {age} years."
+        if entry not in block.value:
+            facts.append(("append", entry))
+
+    if _BULLY_RE.search(user_input):
+        entry = "Child feels: being bullied."
+        if entry not in block.value:
+            facts.append(("append", entry))
+
+    m = _EMOTION_RE.search(user_input)
+    if m:
+        mood = m.group(2).strip().lower()
+        entry = f"Child feels: {mood}."
         if entry not in block.value:
             facts.append(("append", entry))
 
@@ -351,6 +368,12 @@ current_mode: str = ""
 # In game mode: current game/task description for hint context (prompt-only)
 current_game_hint: str = ""
 
+# Tool-calling compatibility:
+# Some Ollama models (e.g. gemma3:1b) return: "does not support tools".
+# We detect that once and permanently switch to "no tools" mode for this run.
+TOOLS_SUPPORTED: bool = True
+TOOLS_UNSUPPORTED_FLAGGED: bool = False
+
 
 # ---------------------------------------------------------------------------
 # Performance timer
@@ -379,6 +402,7 @@ def _extract_text(content: str) -> str:
 
 
 def chat(user_input: str) -> None:
+    global TOOLS_SUPPORTED, TOOLS_UNSUPPORTED_FLAGGED
     timer = PerformanceTimer()
     timer.start()
 
@@ -405,92 +429,166 @@ def chat(user_input: str) -> None:
     all_tools    = mem_exec.get_tool_schemas() + get_communication_tools()
     spoken_message = None
 
-    # ── Tool loop (max 3 iterations) ──────────────────────────────────────
-    # Each iteration: the model either speaks (→ done) or calls memory tools
-    # (→ execute and loop). A nudge is added on iteration 1 if still no speech.
-    for iteration in range(3):
+    def _is_tools_unsupported_error(err: Exception) -> bool:
+        msg = str(err).lower()
+        return ("does not support tools" in msg) or ("support tools" in msg and "does not" in msg)
+
+    def _deliver_from_text(raw_text: str) -> None:
+        """Set spoken_message from model text (optionally extracting tool-like text)."""
+        nonlocal spoken_message
+        clean = _extract_text(raw_text or "")
+        if not clean:
+            return
+
+        # If the model still prints tool calls as text, extract and execute them.
+        parsed = parse_text_tool_calls(clean)
+        for tc in parsed:
+            if tc.get("name") == "send_message":
+                spoken_message = tc.get("arguments", {}).get("message", spoken_message)
+            else:
+                mem_exec.execute(tc.get("name", ""), tc.get("arguments", {}) or {})
+
+        # Otherwise use the clean text directly (avoid dumping JSON blobs).
+        if not spoken_message and not clean.startswith("{"):
+            spoken_message = clean
+
+    def _toolless_system_nudge() -> str:
+        mode = current_mode or getattr(conf, "JHONY_MODE", "chat")
+        if mode == "game":
+            return (
+                "TOOLS ARE NOT SUPPORTED BY THE MODEL ENGINE.\n"
+                "You MUST still update memory using TEXT-TOOL-CALLS (plain text), so the program can parse and execute them.\n"
+                "Output FORMAT (ONLY these lines, no extra prose):\n"
+                "  1) (optional) save_child_info\n"
+                "     {\"content\":\"...\"}\n"
+                "  2) (optional) update_child_info\n"
+                "     {\"old_content\":\"...\",\"new_content\":\"...\"}\n"
+                "  3) (optional) record_learned_word\n"
+                "     {\"russian_word\":\"...\",\"english_word\":\"...\"}\n"
+                "  4) REQUIRED: send_message\n"
+                "     {\"message\":\"...\"}\n"
+                "Game rules for send_message:\n"
+                "  - Russian ONLY\n"
+                "  - HINTS ONLY, never the final answer\n"
+                "  - 3-8 words\n"
+                "Do NOT write any other text besides the tool-call lines above."
+            )
+        return (
+            "TOOLS ARE NOT SUPPORTED BY THE MODEL ENGINE.\n"
+            "You MUST still update memory using TEXT-TOOL-CALLS (plain text), so the program can parse and execute them.\n"
+            "Output FORMAT (ONLY these lines, no extra prose):\n"
+            "  1) (optional) save_child_info\n"
+            "     {\"content\":\"...\"}\n"
+            "  2) (optional) update_child_info\n"
+            "     {\"old_content\":\"...\",\"new_content\":\"...\"}\n"
+            "  3) (optional) record_learned_word\n"
+            "     {\"russian_word\":\"...\",\"english_word\":\"...\"}\n"
+            "  4) (optional) consult_russian_teacher_manual\n"
+            "     {\"query\":\"...\"}\n"
+            "  5) REQUIRED: send_message\n"
+            "     {\"message\":\"...\"}\n"
+            "Chat rules for send_message:\n"
+            "  - Russian ONLY\n"
+            "  - 3-10 words\n"
+            "Do NOT write any other text besides the tool-call lines above."
+        )
+
+    def _run_no_tools_completion() -> None:
+        nonlocal spoken_message
         try:
             resp = client.chat.completions.create(
                 model=MODEL_NAME,
-                messages=working_messages,
-                tools=all_tools,
-                tool_choice="auto",
+                messages=working_messages + [{"role": "system", "content": _toolless_system_nudge()}],
                 max_tokens=150,
             )
+            msg = resp.choices[0].message
+            _deliver_from_text(msg.content or "")
         except Exception as e:
-            print(f"❌ API error (iter {iteration}): {e}")
-            break
+            print(f"❌ No-tools API error: {e}")
 
-        msg        = resp.choices[0].message
-        raw_text   = msg.content or ""
-        tool_calls = msg.tool_calls or []
-
-        if not tool_calls:
-            # Model responded with plain text (inner thought or direct speech)
-            clean = _extract_text(raw_text)
-            if clean:
-                # Try to parse a text-encoded tool call first
-                parsed = parse_text_tool_calls(clean)
-                for tc in parsed:
-                    if tc["name"] == "send_message":
-                        spoken_message = tc["arguments"].get("message", "")
-                        break
-                    else:
-                        mem_exec.execute(tc["name"], tc["arguments"])
-                # Use raw text as message if no send_message found in it
-                if not spoken_message and not any(t["name"] == "send_message" for t in parsed):
-                    # Don't use pure JSON blobs as messages
-                    if not clean.startswith("{"):
-                        spoken_message = clean
-            break  # No tool calls → end loop regardless
-
-        # ── Execute each tool call ────────────────────────────────────────
-        working_messages.append({
-            "role": "assistant",
-            "content": raw_text,
-            "tool_calls": [
-                {"id": tc.id, "type": "function",
-                 "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
-                for tc in tool_calls
-            ],
-        })
-
-        for tc in tool_calls:
+    # ── Tool loop (max 3 iterations) ──────────────────────────────────────
+    # Each iteration: the model either speaks (→ done) or calls memory tools
+    # (→ execute and loop). A nudge is added on iteration 1 if still no speech.
+    if not TOOLS_SUPPORTED:
+        _run_no_tools_completion()
+    else:
+        for iteration in range(3):
             try:
-                args = json.loads(tc.function.arguments or "{}")
-            except json.JSONDecodeError:
-                args = {}
+                resp = client.chat.completions.create(
+                    model=MODEL_NAME,
+                    messages=working_messages,
+                    tools=all_tools,
+                    tool_choice="auto",
+                    max_tokens=150,
+                )
+            except Exception as e:
+                # If this model doesn't support tools, switch permanently to "no tools".
+                if _is_tools_unsupported_error(e):
+                    TOOLS_SUPPORTED = False
+                    if not TOOLS_UNSUPPORTED_FLAGGED:
+                        print("⚠️  This model does not support tools. Switching to no-tools mode for the rest of the run.")
+                        TOOLS_UNSUPPORTED_FLAGGED = True
+                    _run_no_tools_completion()
+                    break
+                print(f"❌ API error (iter {iteration}): {e}")
+                break
 
-            if tc.function.name == "send_message":
-                comm_exec.execute("send_message", args)
-                msg_text = comm_exec.get_last_message()
-                # Pydantic may reject empty args; fall back to raw argument values
-                if not msg_text:
-                    msg_text = next((v for v in args.values() if isinstance(v, str) and v.strip()), None)
-                if msg_text:
-                    spoken_message = msg_text
-                result = "Message delivered."
-            else:
-                result = mem_exec.execute(tc.function.name, args)
+            msg        = resp.choices[0].message
+            raw_text   = msg.content or ""
+            tool_calls = msg.tool_calls or []
 
+            if not tool_calls:
+                # Model responded with plain text (inner thought or direct speech)
+                _deliver_from_text(raw_text)
+                break  # No tool calls → end loop regardless
+
+            # ── Execute each tool call ────────────────────────────────────────
             working_messages.append({
-                "role": "tool",
-                "tool_call_id": tc.id,
-                "name": tc.function.name,
-                "content": str(result),
+                "role": "assistant",
+                "content": raw_text,
+                "tool_calls": [
+                    {"id": tc.id, "type": "function",
+                     "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
+                    for tc in tool_calls
+                ],
             })
 
-        if spoken_message:
-            break
+            for tc in tool_calls:
+                try:
+                    args = json.loads(tc.function.arguments or "{}")
+                except json.JSONDecodeError:
+                    args = {}
 
-        # Model called only memory tools — nudge it to speak on next iteration
-        if iteration == 1:
-            mode = current_mode or getattr(conf, "JHONY_MODE", "chat")
-            if mode == "game":
-                nudge = "Хорошо. Вызови send_message: одна короткая подсказка по-русски. Не говори ответ."
-            else:
-                nudge = "Хорошо. Теперь вызови send_message и ответь ребёнку по-русски (3-6 слов)."
-            working_messages.append({"role": "system", "content": nudge})
+                if tc.function.name == "send_message":
+                    comm_exec.execute("send_message", args)
+                    msg_text = comm_exec.get_last_message()
+                    # Pydantic may reject empty args; fall back to raw argument values
+                    if not msg_text:
+                        msg_text = next((v for v in args.values() if isinstance(v, str) and v.strip()), None)
+                    if msg_text:
+                        spoken_message = msg_text
+                    result = "Message delivered."
+                else:
+                    result = mem_exec.execute(tc.function.name, args)
+
+                working_messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "name": tc.function.name,
+                    "content": str(result),
+                })
+
+            if spoken_message:
+                break
+
+            # Model called only memory tools — nudge it to speak on next iteration
+            if iteration == 1 and not spoken_message:
+                mode = current_mode or getattr(conf, "JHONY_MODE", "chat")
+                if mode == "game":
+                    nudge = "Хорошо. Вызови send_message: одна короткая подсказка по-русски. Не говори ответ."
+                else:
+                    nudge = "Хорошо. Теперь вызови send_message и ответь ребёнку по-русски (3-6 слов)."
+                working_messages.append({"role": "system", "content": nudge})
 
     # ── Emergency fallback: bare text completion ───────────────────────────
     # Fires only when the loop produced nothing — rare, but covers model confusion.

@@ -790,6 +790,24 @@ class TestNextFiveFeatures(unittest.TestCase):
         finally:
             je.core_mem = orig_core
 
+    def test_auto_extract_bullying(self):
+        """Auto-extraction: 'people bully me' is saved into human block."""
+        from jhony_enhanced import auto_extract_facts
+        core_db = os.path.join(self.temp_dir, "core.db")
+        memory = Memory(db_path=core_db)
+        human = memory.get_block("human")
+        human.value = "Child's name: unknown."
+        memory.save()
+
+        import jhony_enhanced as je
+        orig_core = je.core_mem
+        je.core_mem = memory
+        try:
+            auto_extract_facts("Child: people bully me")
+            self.assertIn("being bullied", memory.get_block("human").value.lower())
+        finally:
+            je.core_mem = orig_core
+
 
 class TestIntegration(unittest.TestCase):
     """Integration tests for complete memory workflow"""
