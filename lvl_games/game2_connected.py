@@ -33,6 +33,7 @@ import pygame
 from question_generation_filtered import generate_round_filtered   # NEW (replaces generate_round)
 from question_generation import NOUNS, ADJECTIVES, NUM_WORD
 from image_utils import build_round_surface
+from word_knowledge import update_from_level_game, _NUM_EN_MAP
 
 # -----------------------------
 # SETTINGS  (unchanged)
@@ -454,8 +455,10 @@ class StoryGame:
             for _ in range(ROUNDS_PER_GAME)
         ]
 
-        self.index  = 0
-        self.score  = 0
+        self.index   = 0
+        self.score   = 0
+        self.history = []
+        self.round_attempt_number = 0
 
         self.locked               = False
         self.pending_feedback_audio = None
@@ -477,6 +480,7 @@ class StoryGame:
         self.pending_feedback_audio = None
         self.feedback_time_ms     = 0
         self.advance_time_ms      = 0
+        self.round_attempt_number = 0
 
         self.buttons = []
         for rect, label in zip(self.ui.button_rects, rd["options"]):
@@ -589,7 +593,19 @@ class StoryGame:
 
     def on_choice(self, label, now_ms):
         self.speak_option(label)
-        correct = self.rounds[self.index]["correct"]
+        rd      = self.rounds[self.index]
+        correct = rd["correct"]
+        self.round_attempt_number += 1
+
+        # Record attempt for DB persistence
+        en_key = rd["adj_key"] if rd["qtype"] == "color" else _NUM_EN_MAP.get(rd["count"], str(rd["count"]))
+        self.history.append({
+            "direction": "en_to_ru",
+            "shown":     en_key,
+            "correct":   correct,
+            "ok":        label == correct,
+            "attempt_number": self.round_attempt_number,
+        })
 
         self.locked = True
 
@@ -742,6 +758,7 @@ def main():
             if res == "menu":
                 continue
             if res == "finished":
+                update_from_level_game(game.history, game_name="game2")
                 res2 = finish_screen(game.screen, ui, game.score, len(game.rounds))
                 if res2 == "quit":
                     break

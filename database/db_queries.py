@@ -104,6 +104,7 @@ def get_word_id_by_ru_en(ru, en):
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
 
+    # Try lemma match first
     row = conn.execute("""
         SELECT w.word_id
         FROM words w
@@ -111,6 +112,17 @@ def get_word_id_by_ru_en(ru, en):
         WHERE w.lemma_rus = ? AND wt.word_eng = ?
         LIMIT 1
     """, (ru, en)).fetchone()
+
+    if not row:
+        # Fall back to inflected forms stored in word_forms
+        row = conn.execute("""
+            SELECT w.word_id
+            FROM words w
+            JOIN word_translations wt ON wt.word_id = w.word_id
+            JOIN word_forms wf ON wf.word_id = w.word_id
+            WHERE wf.form_value = ? AND wt.word_eng = ?
+            LIMIT 1
+        """, (ru, en)).fetchone()
 
     conn.close()
     return row["word_id"] if row else None
@@ -181,9 +193,9 @@ def upsert_user_word_progress(user_id, word_id, was_correct):
     conn.close()
 
 
-def save_level_game_history(history):
+def save_level_game_history(history, game_name="level_game"):
     """
-    Save raw level-game attempts into game_events.
+    Save raw game attempts into game_events.
 
     Does NOT update user_word_progress.
     Progress updates are handled separately in update_from_level_game().
@@ -192,14 +204,14 @@ def save_level_game_history(history):
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
 
-    # Ensure the game exists
-    cur.execute("SELECT game_id FROM games WHERE game_name = ?", ("level_game",))
+    # Ensure the game row exists
+    cur.execute("SELECT game_id FROM games WHERE game_name = ?", (game_name,))
     row = cur.fetchone()
 
     if row:
         game_id = row[0]
     else:
-        cur.execute("INSERT INTO games (game_name) VALUES (?)", ("level_game",))
+        cur.execute("INSERT INTO games (game_name) VALUES (?)", (game_name,))
         game_id = cur.lastrowid
 
     for entry in history:
@@ -207,6 +219,11 @@ def save_level_game_history(history):
         shown = (entry.get("shown") or "").strip()
         correct = (entry.get("correct") or "").strip()
         ok = bool(entry.get("ok", False))
+        attempt_number = entry.get("attempt_number")
+        if isinstance(attempt_number, int) and attempt_number > 0:
+            db_attempt_number = attempt_number
+        else:
+            db_attempt_number = None
 
         if direction == "ru_to_en":
             ru = shown
@@ -237,7 +254,7 @@ def save_level_game_history(history):
             "level_attempt",
             1 if ok else 0,
             0,
-            None,
+            db_attempt_number,
         ))
 
     conn.commit()

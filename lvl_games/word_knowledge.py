@@ -61,7 +61,7 @@ def ru_form_to_en(ru_word: str) -> Optional[str]:
     return _RU_FORM_TO_EN.get((ru_word or "").strip().lower())
 
 # ── Update from level-game results ───────────────────────────────────────────
-def update_from_level_game(history: List[Dict], user_id: Optional[int] = None) -> Dict[str, Any]:
+def update_from_level_game(history: List[Dict], user_id: Optional[int] = None, game_name: str = "level_game") -> Dict[str, Any]:
     """
     Persist level-game results into DB-backed user_word_progress.
 
@@ -72,7 +72,7 @@ def update_from_level_game(history: List[Dict], user_id: Optional[int] = None) -
     """
     if user_id is None:
         user_id = 1
-    save_level_game_history(history)
+    save_level_game_history(history, game_name=game_name)
 
     # Build EN -> word_id lookup from DB
     conn = sqlite3.connect(DB_PATH)
