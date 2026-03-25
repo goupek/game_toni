@@ -338,7 +338,8 @@ class VoiceAssistant:
         self.tts.start()
         print("[Init] TTS worker started.")
 
-        self.sample_rate = self._pick_input_rate()
+        # self.sample_rate = self._pick_input_rate()
+        self.sample_rate = 32000
         self.frame_samples = int(self.sample_rate * FRAME_MS / 1000)
         self.frame_bytes = self.frame_samples * 2
         print(f"[Init] Mic sample rate: {self.sample_rate} Hz")

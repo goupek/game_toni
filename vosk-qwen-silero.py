@@ -11,7 +11,9 @@ import wave
 from collections import deque
 from dataclasses import dataclass
 from typing import List, Dict, Optional
+from transliterate import translit
 
+import torch
 import requests
 import sounddevice as sd
 import webrtcvad
@@ -35,9 +37,9 @@ OLLAMA_NUM_PREDICT = 150
 OLLAMA_TEMPERATURE = 0.4
 OLLAMA_NUM_CTX = 512
 
-# PIPER_MODEL_PATH = "models/piper/ru_RU-ruslan-medium.onnx"
-PIPER_MODEL_PATH = "models/piper/ru_RU-irina-medium.onnx"
-
+SILERO_MODEL_PATH = "models/silero/v5_ru.pt"
+SILERO_SPEAKER = "xenia"   # options: aidar, baya, kseniya, xenia, eugene
+SILERO_SAMPLE_RATE = 48000
 
 FRAME_MS = 20
 VAD_AGGRESSIVENESS = 2
@@ -59,9 +61,21 @@ def contains_phrase(text: str, phrases: List[str]) -> bool:
     t = normalize_text(text)
     return any(p in t for p in phrases)
 
-# =========================
-# OLLAMA LOGIC (STREAMING)
-# =========================
+def russify_text(text: str) -> str:
+    """
+    Convert any English words in text to Russian phonetic transliteration.
+    Leaves already-Cyrillic words untouched.
+    """
+    def replace_english(match):
+        word = match.group(0)
+        try:
+            return translit(word, 'ru')
+        except Exception:
+            return word
+
+    # find sequences of latin characters (English words)
+    return re.sub(r'[a-zA-Z]+', replace_english, text)
+
 def ollama_chat_stream(messages: List[Dict]):
     payload = {
         "model": OLLAMA_MODEL,
@@ -91,27 +105,15 @@ class AudioStateTracker:
         self.active = threading.Event()
 
 # =========================
-# TTS WORKER  (Python piper library, same structure as original)
+# TTS WORKER (Silero v5)
 # =========================
 class TTSWorker(threading.Thread):
-    """
-    Same structure as the original TTSWorker.
-    _synthesize_and_play() calls the piper Python library directly
-    instead of spawning a CLI subprocess.
-
-    Why: the pip-installed piper CLI buffers stdout at the C libc level.
-    Binary writes to sys.stdout.buffer are not fixed by -u or PYTHONUNBUFFERED,
-    so any subprocess approach hangs waiting for the RIFF header.
-    Importing the library directly has no pipe at all.
-    """
-
     def __init__(self, audio_tracker: AudioStateTracker):
         super().__init__(daemon=True)
         self.audio_tracker = audio_tracker
         self.q: "queue.Queue[str]" = queue.Queue(maxsize=50)
         self._stop = threading.Event()
-        self._voice = None   # PiperVoice, loaded once on first use
-        self._sr = None      # model sample rate
+        self._model = None
 
     def stop(self):
         self._stop.set()
@@ -126,117 +128,77 @@ class TTSWorker(threading.Thread):
             print(f"[TTS] Queued: {text!r}")
             self.q.put(text)
 
-    # ------------------------------------------------------------------
     def _lazy_init(self):
-        """Load the piper model once. Called before the first synthesis."""
-        if self._voice is not None:
+        if self._model is not None:
             return
-        print(f"[TTS] Loading piper model: {PIPER_MODEL_PATH}")
+        print(f"[TTS] Loading Silero v5 from {SILERO_MODEL_PATH}...")
         t0 = time.time()
         try:
-            from piper import PiperVoice
-            self._voice = PiperVoice.load(PIPER_MODEL_PATH)
-            # piper-tts 1.3.0: sample rate is on config.sample_rate
-            self._sr = self._voice.config.sample_rate
-            print(f"[TTS] Model loaded in {time.time()-t0:.2f}s  sample_rate={self._sr} Hz")
-            print(f"[TTS] PiperVoice API methods: {[m for m in dir(self._voice) if not m.startswith('_')]}")
-
-            print("[TTS] Running warmup synthesis...")
-            warmup = self._synthesize_to_wav("Hello.")
-            if warmup:
-                print(f"[TTS] Warmup OK — {len(warmup)} bytes. Ready.")
-            else:
-                print("[TTS] Warmup produced no audio — check model path or API.")
-
-        except ImportError:
-            print("[TTS ERROR] Cannot import piper. Run: pip install piper-tts")
+            self._model = torch.package.PackageImporter(SILERO_MODEL_PATH).load_pickle("tts_models", "model")
+            self._model.to(torch.device("cpu"))
+            print(f"[TTS] Silero loaded in {time.time()-t0:.2f}s. Running warmup...")
+            self._model.apply_tts(text="Привет.", speaker=SILERO_SPEAKER, sample_rate=SILERO_SAMPLE_RATE)
+            print("[TTS] Warmup OK. Ready.")
         except Exception as e:
-            print(f"[TTS ERROR] Failed to load model: {e}")
+            print(f"[TTS ERROR] Failed to load Silero: {e}")
             traceback.print_exc()
 
-    # ------------------------------------------------------------------
-    def _synthesize_to_wav(self, text: str) -> Optional[bytes]:
-        """Synthesize text -> WAV bytes using piper-tts 1.3.0 (OHF-voice).
+    def _sanitize(self, text: str) -> str:
+        text = re.sub(r'[*_~`]', '', text)
+        if text and text[-1] not in '.!?':
+            text += '.'
+        return text.strip()
 
-        piper-tts 1.3.0 API:  voice.synthesize_wav(text, wav_file)
-          - writes audio directly into an open wave.Wave_write object.
+    def _has_cyrillic(self, text: str) -> bool:
+        return bool(re.search('[а-яА-ЯёЁ]', text))
 
-        Do NOT use synthesize_stream_raw() or synthesize() -- both are from
-        different versions and will throw AttributeError on this package.
-        """
-        if self._voice is None:
-            print("[TTS ERROR] Voice not loaded.")
-            return None
-        try:
-            buf = io.BytesIO()
-            with wave.open(buf, "wb") as wf:
-                wf.setnchannels(1)
-                wf.setsampwidth(2)        # 16-bit PCM
-                wf.setframerate(self._sr)
-                self._voice.synthesize_wav(text, wf)
-
-            wav_bytes = buf.getvalue()
-            if len(wav_bytes) <= 44:      # header only = no audio produced
-                print(f"[TTS ERROR] No audio produced for: {text!r}")
-                return None
-            return wav_bytes
-        except Exception as e:
-            print(f"[TTS ERROR] _synthesize_to_wav: {e}")
-            traceback.print_exc()
-            return None
-
-    # ------------------------------------------------------------------
-    def _play_wav(self, wav_bytes: bytes):
-        """Send WAV bytes to aplay for playback."""
-        try:
-            print(f"[Playback] Sending {len(wav_bytes)} bytes to aplay...")
-            t0 = time.time()
-            proc = subprocess.Popen(
-                ["aplay", "-q", "-"],
-                stdin=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-            )
-            _, err = proc.communicate(input=wav_bytes)
-            elapsed = (time.time() - t0) * 1000
-            if proc.returncode != 0:
-                print(f"[Playback ERROR] aplay rc={proc.returncode}: {err.decode(errors='replace').strip()}")
-            else:
-                print(f"[Playback] Finished in {elapsed:.0f}ms")
-        except FileNotFoundError:
-            print("[Playback ERROR] 'aplay' not found. Install: apt install alsa-utils")
-        except Exception as e:
-            print(f"[Playback ERROR] {e}")
-            traceback.print_exc()
-
-    # ------------------------------------------------------------------
     def _synthesize_and_play(self, text: str):
-        """Full speak cycle: init -> synthesize -> play. Same role as original _synthesize_and_save."""
         self._lazy_init()
-        if self._voice is None:
-            return  # init failed, already logged
+        if self._model is None:
+            return
+
+        text = self._sanitize(text)
+        if not text:
+            return
+        
+        text = russify_text(text) # Convert any English words to Russian phonetic transliteration
+
+        if not self._has_cyrillic(text):
+            print(f"[TTS] Skipping non-Russian text: {text!r}")
+            return
 
         try:
             self.audio_tracker.active.set()
             print(f"[TTS] Synthesizing: {text!r}")
             t0 = time.time()
 
-            wav_bytes = self._synthesize_to_wav(text)
-            if wav_bytes is None:
-                return
-
+            audio = self._model.apply_tts(
+                text=text,
+                speaker=SILERO_SPEAKER,
+                sample_rate=SILERO_SAMPLE_RATE,
+            )
+            wav = audio.numpy()
             synth_ms = (time.time() - t0) * 1000
-            print(f"[TTS] Synthesis done: {len(wav_bytes)} bytes in {synth_ms:.0f}ms")
+            print(f"[TTS] Synthesis done in {synth_ms:.0f}ms")
 
-            self._play_wav(wav_bytes)
+            proc = subprocess.Popen(
+                ["aplay", "-q", "-r", str(SILERO_SAMPLE_RATE), "-f", "FLOAT_LE", "-c", "1", "-"],
+                stdin=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            _, err = proc.communicate(input=wav.tobytes())
+            if proc.returncode != 0:
+                print(f"[Playback ERROR] aplay: {err.decode(errors='replace').strip()}")
+            else:
+                print(f"[Playback] Done.")
 
         except Exception as e:
-            print(f"[TTS ERROR] _synthesize_and_play: {e}")
+            print(f"[TTS ERROR] {e}")
             traceback.print_exc()
         finally:
             self.audio_tracker.active.clear()
             print("[TTS] Mic unmuted.")
 
-    # ------------------------------------------------------------------
     def run(self):
         print("[TTS] Worker thread started.")
         while not self._stop.is_set():
@@ -340,7 +302,6 @@ class VoiceAssistant:
         self.tts.start()
         print("[Init] TTS worker started.")
 
-        # self.sample_rate = self._pick_input_rate()
         self.sample_rate = 32000
         self.frame_samples = int(self.sample_rate * FRAME_MS / 1000)
         self.frame_bytes = self.frame_samples * 2
@@ -487,7 +448,6 @@ class VoiceAssistant:
                         self.tts.say(clean)
                     current_sentence = ""
 
-            # flush any remaining text after stream ends
             clean = re.sub(r'[*_~`]', '', current_sentence.strip())
             if clean:
                 print(f"[LLM -> TTS] (remainder) {clean!r}")
@@ -498,7 +458,7 @@ class VoiceAssistant:
         except Exception as e:
             print(f"[LLM ERROR] {e}")
             traceback.print_exc()
-            self.tts.say("Sorry, I had trouble answering that.")
+            self.tts.say("Извини, у меня возникла проблема.")
 
         print(f"[ASSISTANT] {full_response.strip()}")
         self.messages.append({"role": "assistant", "content": full_response.strip()})
@@ -524,7 +484,7 @@ class VoiceAssistant:
                 while True:
                     if self.state.mode == "ACTIVE" and (time.time() - self.state.last_activity) > ACTIVE_IDLE_TIMEOUT_SEC:
                         print("[Idle] Timeout — going to sleep.")
-                        self.tts.say("I'll wait. Say 'hey box' if you need me.")
+                        self.tts.say("Я подожду. Скажи привет бокс, если понадоблюсь.")
                         self._enter_sleep()
 
                     frame = self.audio_q.get()
@@ -556,7 +516,7 @@ class VoiceAssistant:
                                 print(f"[STT] {user_text}")
                                 self.state.last_activity = time.time()
                                 if contains_phrase(user_text, SLEEP_PHRASES):
-                                    self.tts.say("Okay. Say 'hey box' if you need me.")
+                                    self.tts.say("Хорошо. Скажи привет бокс, если понадоблюсь.")
                                     self._enter_sleep()
                                 else:
                                     self._respond_with_llm(user_text)

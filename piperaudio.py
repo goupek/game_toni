@@ -6,6 +6,7 @@ import threading
 import time
 import re
 import subprocess
+import numpy as np
 from collections import deque
 from dataclasses import dataclass
 from typing import List, Dict, Optional
@@ -13,43 +14,52 @@ from typing import List, Dict, Optional
 import requests
 import sounddevice as sd
 import webrtcvad
-from vosk import Model, KaldiRecognizer
+
+from faster_whisper import WhisperModel
 
 # =========================
 # CONFIGURATION
 # =========================
 MIC_DEVICE = 24  # Update to your specific microphone ID on the Jetson
 
-# Vosk model folder
-VOSK_MODEL_PATH = "models/vosk/vosk-model-small-en-us-0.15"
+# --- GPU / Whisper STT Configuration ---
+# Model size options: "tiny", "base", "small", "medium", "large-v2", "large-v3"
+# For Jetson Orin with limited VRAM, "small" or "base" is recommended.
+# Set device="cuda" to use GPU, device="cpu" to fall back to CPU.
+WHISPER_MODEL_SIZE = "tiny"
+WHISPER_DEVICE     = "cuda"          # "cuda" | "cpu"
+WHISPER_COMPUTE    = "int8"       # "float16" for GPU, "int8" for CPU
+WHISPER_LANGUAGE   = "en"            # Primary expected language (helps accuracy)
 
-# Ollama (server must be running)
-OLLAMA_URL = "http://localhost:11434"
+# Ollama (server must be running; it uses GPU automatically if configured)
+OLLAMA_URL   = "http://localhost:11434"
 OLLAMA_MODEL = "qwen2.5:0.5b"
 
 # Wake words & commands
-WAKE_WORDS = ["hey box", "okay box", "hi box", "box box"]
-GREETING = "Hi, how can I help you?"
+WAKE_WORDS    = ["hey box", "okay box", "hi box", "box box", "Брузер"]
+# GREETING      = "Hi, how can I help you?"
+GREETING      = "Привет, чем я могу тебе помочь?"
 SLEEP_PHRASES = ["go to sleep", "sleep", "stop listening", "goodbye", "bye"]
 
 # LLM Limits
-MAX_ASSISTANT_WORDS = 30
-OLLAMA_NUM_PREDICT = 80
-OLLAMA_TEMPERATURE = 0.4
-OLLAMA_NUM_CTX = 512 
+MAX_ASSISTANT_WORDS = 150
+OLLAMA_NUM_PREDICT  = 80
+OLLAMA_TEMPERATURE  = 0.4
+OLLAMA_NUM_CTX      = 512
 
 # Piper TTS Configuration
-PIPER_EXEC_PATH = "piper" # Assumes piper is in the same directory on your Jetson
-PIPER_MODEL_PATH = "models/piper/en_US-lessac-medium.onnx"
+PIPER_EXEC_PATH  = "piper"
+PIPER_MODEL_PATH = "models/piper/ru_RU-irina-medium.onnx"
 
 # VAD settings
-FRAME_MS = 20                  
-VAD_AGGRESSIVENESS = 2          
-PRE_ROLL_MS = 300               
-END_SILENCE_MS = 500            
-MAX_UTT_SLEEP_SEC = 3.0         
-MAX_UTT_ACTIVE_SEC = 20.0
-VAD_SUPPORTED_RATES = [16000, 48000, 32000, 8000]
+FRAME_MS              = 20
+VAD_AGGRESSIVENESS    = 2
+PRE_ROLL_MS           = 300
+END_SILENCE_MS        = 600       # slightly longer to avoid cutting Whisper off
+MAX_UTT_SLEEP_SEC     = 3.0
+MAX_UTT_ACTIVE_SEC    = 20.0
+VAD_SUPPORTED_RATES   = [16000, 48000, 32000, 8000]
+WHISPER_INTERNAL_RATE = 16000     # Whisper always needs 16 kHz
 ACTIVE_IDLE_TIMEOUT_SEC = 60
 
 # =========================
@@ -61,7 +71,7 @@ def normalize_text(s: str) -> str:
 
 def contains_phrase(text: str, phrases: List[str]) -> bool:
     t = normalize_text(text)
-    return any(p in t for p in phrases)
+    return t in WAKE_WORDS
 
 def clamp_words(text: str, max_words: int) -> str:
     words = text.strip().split()
@@ -95,8 +105,7 @@ def ollama_chat_once(messages: List[Dict]) -> str:
 # =========================
 class AudioStateTracker:
     def __init__(self):
-        # Removed file path and counter logic; just tracking mic state now.
-        self.lock = threading.Lock()
+        self.lock  = threading.Lock()
         self.active = threading.Event()
 
 # =========================
@@ -107,8 +116,11 @@ class TTSWorker(threading.Thread):
         super().__init__(daemon=True)
         self.audio_tracker = audio_tracker
         self.q: "queue.Queue[str]" = queue.Queue(maxsize=50)
-        self._stop = threading.Event()
+        self._stop  = threading.Event()
         self._ready = False
+        self._model = None # Silero TTS
+        self._sr = 48000 # Silero TTS
+        self._speaker = "xenia"  # options: aidar, baya, kseniya, xenia, eugene
 
     def stop(self):
         self._stop.set()
@@ -120,65 +132,90 @@ class TTSWorker(threading.Thread):
     def say(self, text: str):
         text = text.strip()
         if text:
+            print(f"[TTS] Queued: {text!r}")
             self.q.put(text)
 
+
+    # def _lazy_init(self):
+    #     if self._ready:
+    #         return
+    #     if not os.path.exists(PIPER_MODEL_PATH):
+    #         print(f"[TTS Error] Could not find Piper model at {PIPER_MODEL_PATH}")
+    #         return
+    #     self._ready = True
+    #     print("[TTS] CLI Ready.")
+
     def _lazy_init(self):
-        if self._ready:
+        if self._model is not None:
             return
-        if not os.path.exists(PIPER_MODEL_PATH):
-            print(f"[TTS Error] Could not find Piper model at {PIPER_MODEL_PATH}")
-            return
-        self._ready = True
-        print("[TTS] CLI Ready.")
+        print("[TTS] Loading Silero v5...")
+        import torch
+        local_file = "models/silero/v5_ru.pt"
+        device = torch.device("cpu")  # keep CPU, save GPU for LLM+STT
+        self._model = torch.package.PackageImporter(local_file).load_pickle("tts_models", "model")
+        self._model.to(device)
+        print("[TTS] Silero v5 ready.")
 
-    def _synthesize_and_save(self, text: str):
-        self._lazy_init()
+    """Synthesize function for Silero TTS"""
+    def _synthesize_and_play(self, text: str):
+            self._lazy_init()
+            try:
+                self.audio_tracker.active.set()
+                print(f"[TTS] Synthesizing: {text!r}")
+                import torch
+                audio = self._model.apply_tts(
+                    text=text,
+                    speaker=self._speaker,
+                    sample_rate=self._sr
+                )
+                # audio is a torch tensor, convert to numpy
+                wav = audio.numpy()
+                proc = subprocess.Popen(
+                    ["aplay", "-q", "-r", str(self._sr), "-f", "FLOAT_LE", "-c", "1", "-"],
+                    stdin=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+                proc.communicate(input=wav.tobytes())
+            except Exception as e:
+                print(f"[TTS ERROR] {e}")
+                traceback.print_exc()
+            finally:
+                self.audio_tracker.active.clear()
+                print("[TTS] Mic unmuted.")
 
-        try:
-            self.audio_tracker.active.set() 
-            print("[TTS] Synthesizing and playing instantly (No save)...")
-            
-            # 1. Start aplay first, telling it to read from standard input ("-")
-            aplay_process = subprocess.Popen(
-                ["aplay", "-q", "-"],
-                stdin=subprocess.PIPE,
-                stderr=subprocess.DEVNULL
-            )
-            
-            # 2. Start Piper. Because we don't provide an --output_file, 
-            # it automatically streams a WAV file directly to its standard output.
-            piper_command = [
-                PIPER_EXEC_PATH,
-                "--model", PIPER_MODEL_PATH
-            ]
-            
-            piper_process = subprocess.Popen(
-                piper_command,
-                stdin=subprocess.PIPE,
-                stdout=aplay_process.stdin, # Route Piper's output directly into aplay
-                stderr=subprocess.PIPE
-            )
-            
-            # 3. Feed the text into Piper
-            _, stderr_data = piper_process.communicate(input=text.encode('utf-8'))
-            
-            # 4. Close aplay's input stream so it knows Piper is done, then wait for it to finish speaking
-            aplay_process.stdin.close()
-            aplay_process.wait()
-            
-            if piper_process.returncode != 0:
-                print(f"[TTS CLI Error]: Piper failed. Error: {stderr_data.decode('utf-8')}")
-            else:
-                print("[TTS] Finished speaking.")
-                
-        except FileNotFoundError:
-             print(f"[TTS Error]: Could not find executable. Ensure '{PIPER_EXEC_PATH}' or 'aplay' is installed.")
-        except Exception as e:
-            print(f"[TTS Error]: {e}")
-            traceback.print_exc()
-        finally:
-            # Let the microphone start listening again
-            self.audio_tracker.active.clear()
+    """Synthesize function for piper CLI"""
+    # def _synthesize_and_play(self, text: str):
+    #     self._lazy_init()
+    #     try:
+    #         self.audio_tracker.active.set()
+    #         print("[TTS] Synthesizing and playing instantly...")
+
+    #         aplay_process = subprocess.Popen(
+    #             ["aplay", "-q", "-"],
+    #             stdin=subprocess.PIPE,
+    #             stderr=subprocess.DEVNULL
+    #         )
+    #         piper_process = subprocess.Popen(
+    #             [PIPER_EXEC_PATH, "--model", PIPER_MODEL_PATH],
+    #             stdin=subprocess.PIPE,
+    #             stdout=aplay_process.stdin,
+    #             stderr=subprocess.PIPE
+    #         )
+    #         _, stderr_data = piper_process.communicate(input=text.encode("utf-8"))
+    #         aplay_process.stdin.close()
+    #         aplay_process.wait()
+
+    #         if piper_process.returncode != 0:
+    #             print(f"[TTS CLI Error]: {stderr_data.decode('utf-8')}")
+    #         else:
+    #             print("[TTS] Finished speaking.")
+    #     except FileNotFoundError:
+    #         print(f"[TTS Error]: Could not find '{PIPER_EXEC_PATH}' or 'aplay'.")
+    #     except Exception as e:
+    #         print(f"[TTS Error]: {e}")
+    #         traceback.print_exc()
+    #     finally:
+    #         self.audio_tracker.active.clear()
 
     def run(self):
         while not self._stop.is_set():
@@ -188,120 +225,158 @@ class TTSWorker(threading.Thread):
             if not text:
                 continue
             try:
-                self._synthesize_and_save(text)
+                self._synthesize_and_play(text)
             except Exception as e:
                 print(f"[TTS] Error: {e}")
                 traceback.print_exc()
 
 # =========================
-# VAD & VOSK CAPTURE
+# GPU-ACCELERATED WHISPER STT
 # =========================
-@dataclass
-class CaptureOut:
-    partial: Optional[str] = None
-    final: Optional[str] = None
+class WhisperSTT:
+    """
+    Wraps faster-whisper on CUDA.
+    Call transcribe(pcm_int16_bytes, sample_rate) → str
+    """
+    def __init__(self):
+        print(f"[Whisper] Loading model '{WHISPER_MODEL_SIZE}' on {WHISPER_DEVICE} ({WHISPER_COMPUTE})…")
+        self.model = WhisperModel(
+            WHISPER_MODEL_SIZE,
+            device=WHISPER_DEVICE,
+            compute_type=WHISPER_COMPUTE,
+        )
+        print("[Whisper] Model loaded.")
 
-class VadVoskCapture:
+    def transcribe(self, pcm_bytes: bytes, sample_rate: int) -> str:
+        # Convert raw int16 PCM → float32 normalised [-1, 1] at 16 kHz
+        audio_np = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+
+        # Resample to 16 kHz if the mic runs at a different rate
+        if sample_rate != WHISPER_INTERNAL_RATE:
+            ratio   = WHISPER_INTERNAL_RATE / sample_rate
+            new_len = int(len(audio_np) * ratio)
+            audio_np = np.interp(
+                np.linspace(0, len(audio_np) - 1, new_len),
+                np.arange(len(audio_np)),
+                audio_np,
+            ).astype(np.float32)
+
+        segments, _ = self.model.transcribe(
+            audio_np,
+            # language=WHISPER_LANGUAGE,
+            beam_size=3,
+            vad_filter=False,                # Whisper's built-in VAD filter
+            vad_parameters={"min_silence_duration_ms": 300},
+        )
+        return " ".join(s.text for s in segments).strip()
+
+# =========================
+# VAD-BASED AUDIO CAPTURE
+# Collects raw PCM frames while speech is detected,
+# then hands the whole utterance to Whisper.
+# =========================
+class VadCapture:
+    """
+    Accumulates audio frames using WebRTC-VAD.
+    Returns a complete utterance (raw bytes) when silence is detected.
+    """
     def __init__(self, vad: webrtcvad.Vad, sr: int, frame_ms: int):
-        self.vad = vad
-        self.sr = sr
-        self.frame_ms = frame_ms
-        self.frame_samples = int(sr * frame_ms / 1000)
-        self.frame_bytes = self.frame_samples * 2
-        self.pre_roll_frames = max(1, int(PRE_ROLL_MS / frame_ms))
-        self.end_silence_frames = max(1, int(END_SILENCE_MS / frame_ms))
-        self.pre = deque(maxlen=self.pre_roll_frames)
-        self.triggered = False
-        self.silence = 0
-        self.start_time = 0.0
+        self.vad              = vad
+        self.sr               = sr
+        self.frame_ms         = frame_ms
+        self.frame_samples    = int(sr * frame_ms / 1000)
+        self.frame_bytes      = self.frame_samples * 2
+        self.pre_roll_frames  = max(1, int(PRE_ROLL_MS / frame_ms))
+        self.end_silence_frm  = max(1, int(END_SILENCE_MS / frame_ms))
+        self.pre              = deque(maxlen=self.pre_roll_frames)
+        self.triggered        = False
+        self.silence          = 0
+        self.start_time       = 0.0
+        self.buf: List[bytes] = []
 
     def reset(self):
         self.pre.clear()
         self.triggered = False
-        self.silence = 0
+        self.silence   = 0
         self.start_time = 0.0
+        self.buf       = []
 
-    def step(self, frame: bytes, rec: KaldiRecognizer, max_utt_sec: float, want_partial: bool) -> CaptureOut:
+    def feed(self, frame: bytes, max_utt_sec: float) -> Optional[bytes]:
+        """
+        Feed one VAD frame.
+        Returns the complete utterance as raw PCM bytes when done, else None.
+        """
         if len(frame) != self.frame_bytes:
-            return CaptureOut()
+            return None
 
         is_speech = self.vad.is_speech(frame, self.sr)
 
         if not self.triggered:
             self.pre.append(frame)
             if is_speech:
-                self.triggered = True
-                self.silence = 0
+                self.triggered  = True
+                self.silence    = 0
                 self.start_time = time.time()
-                for fr in self.pre:
-                    rec.AcceptWaveform(fr)
+                self.buf        = list(self.pre) + [frame]
                 self.pre.clear()
-                rec.AcceptWaveform(frame)
-                if want_partial:
-                    pres = json.loads(rec.PartialResult() or "{}")
-                    p = (pres.get("partial") or "").strip()
-                    return CaptureOut(partial=p or None)
-            return CaptureOut()
+            return None
 
-        rec.AcceptWaveform(frame)
+        self.buf.append(frame)
         if is_speech:
             self.silence = 0
         else:
             self.silence += 1
 
-        partial = None
-        if want_partial:
-            pres = json.loads(rec.PartialResult() or "{}")
-            partial = (pres.get("partial") or "").strip() or None
-
         too_long = (time.time() - self.start_time) >= max_utt_sec
-        ended = (self.silence >= self.end_silence_frames) or too_long
+        ended    = (self.silence >= self.end_silence_frm) or too_long
 
         if ended:
-            res = json.loads(rec.FinalResult() or "{}")
-            text = (res.get("text") or "").strip() or None
+            result = b"".join(self.buf)
             self.reset()
-            return CaptureOut(partial=partial, final=text)
+            return result
 
-        return CaptureOut(partial=partial)
+        return None
 
 # =========================
 # MAIN ASSISTANT
 # =========================
 @dataclass
 class State:
-    mode: str 
+    mode: str
     last_activity: float
 
 class VoiceAssistant:
     def __init__(self):
-        self.state = State(mode="SLEEP", last_activity=time.time())
+        self.state         = State(mode="SLEEP", last_activity=time.time())
         self.audio_q: "queue.Queue[bytes]" = queue.Queue(maxsize=400)
         self.audio_tracker = AudioStateTracker()
-        self.tts = TTSWorker(self.audio_tracker)
+        self.tts           = TTSWorker(self.audio_tracker)
         self.tts.start()
 
-        self.sample_rate = self._pick_input_rate()
+        self.sample_rate   = 32000
         self.frame_samples = int(self.sample_rate * FRAME_MS / 1000)
-        self.frame_bytes = self.frame_samples * 2
+        self.frame_bytes   = self.frame_samples * 2
 
-        self.vosk_model = Model(VOSK_MODEL_PATH)
-        self._make_recognizers()
+        # GPU STT
+        self.whisper = WhisperSTT()
 
-        self.vad = webrtcvad.Vad(VAD_AGGRESSIVENESS)
-        self.capture = VadVoskCapture(self.vad, self.sample_rate, FRAME_MS)
+        # VAD
+        self.vad     = webrtcvad.Vad(VAD_AGGRESSIVENESS)
+        self.capture = VadCapture(self.vad, self.sample_rate, FRAME_MS)
 
         self.messages: List[Dict] = [
             {"role": "system",
              "content": (
                  "You are an educational voice assistant for kids. "
+                 "Always respond in Russian. "
                  "Be friendly, clear, and concise. "
                  f"Answer in at most {MAX_ASSISTANT_WORDS} words. "
-                 "If unsure, ask one short question."
+                 "If unsure, ask one short question in Russian."
              )}
         ]
         self.mic_gate_until = 0.0
 
+    # ------------------------------------------------------------------
     def _pick_input_rate(self) -> int:
         for sr in VAD_SUPPORTED_RATES:
             try:
@@ -310,26 +385,19 @@ class VoiceAssistant:
             except Exception:
                 continue
         info = sd.query_devices(None, "input")
-        sr = int(info["default_samplerate"])
+        sr   = int(info["default_samplerate"])
         if sr not in VAD_SUPPORTED_RATES:
             raise RuntimeError(f"Mic sample rate {sr} not supported. Use one of {VAD_SUPPORTED_RATES}.")
         return sr
-
-    def _make_recognizers(self):
-        wake_grammar = json.dumps(WAKE_WORDS)
-        self.rec_wake = KaldiRecognizer(self.vosk_model, self.sample_rate, wake_grammar)
-        self.rec_full = KaldiRecognizer(self.vosk_model, self.sample_rate)
 
     def _audio_callback(self, indata, frames, time_info, status):
         if status:
             print(status)
         if self.audio_tracker.active.is_set() or time.time() < self.mic_gate_until:
             return
-
         b = bytes(indata)
         if len(b) != self.frame_bytes:
             return
-
         try:
             self.audio_q.put_nowait(b)
         except queue.Full:
@@ -341,21 +409,19 @@ class VoiceAssistant:
 
     def _trim_history(self, keep_last_pairs: int = 4):
         sys_msg = self.messages[:1]
-        rest = self.messages[1:]
+        rest    = self.messages[1:]
         if len(rest) > keep_last_pairs * 2:
             self.messages = sys_msg + rest[-keep_last_pairs * 2:]
 
     def _enter_sleep(self):
         self.state.mode = "SLEEP"
         self.state.last_activity = time.time()
-        self._make_recognizers()
         self.capture.reset()
         print("[STATE] -> SLEEP")
 
     def _enter_active(self):
         self.state.mode = "ACTIVE"
         self.state.last_activity = time.time()
-        self._make_recognizers()
         self.capture.reset()
         print("[STATE] -> ACTIVE")
         self.tts.say(GREETING)
@@ -363,18 +429,17 @@ class VoiceAssistant:
     def _respond_with_llm(self, user_text: str):
         self.messages.append({"role": "user", "content": user_text})
         self._trim_history()
-
         print(f"[USER] {user_text}")
         assistant_full = ""
         try:
             assistant_full = ollama_chat_once(self.messages)
             assistant_full = clamp_words(assistant_full, MAX_ASSISTANT_WORDS)
             if not assistant_full:
-                assistant_full = "Sorry, I had trouble answering that."
+                assistant_full = "Извини, не смог ответить."
             self.tts.say(assistant_full)
         except Exception as e:
             print(f"[LLM] Error: {e}")
-            assistant_full = "Sorry, I had trouble answering that."
+            assistant_full = "Извини, не смог ответить."
             self.tts.say(assistant_full)
 
         print(f"[ASSISTANT] {assistant_full}")
@@ -382,63 +447,73 @@ class VoiceAssistant:
         self._trim_history()
         self.mic_gate_until = time.time() + 0.15
 
+    # ------------------------------------------------------------------
+    def _transcribe_utterance(self, pcm_bytes: bytes) -> str:
+        """Run Whisper on collected audio. Runs on GPU."""
+        try:
+            text = self.whisper.transcribe(pcm_bytes, self.sample_rate)
+            return text
+        except Exception as e:
+            print(f"[Whisper] Transcription error: {e}")
+            traceback.print_exc()
+            return ""
+
+    # ------------------------------------------------------------------
     def run_forever(self):
         print("==============================================")
-        print("Assistant running (Piper Streaming Mode).")
-        print(f"Input sample rate: {self.sample_rate} Hz | Frame: {FRAME_MS} ms")
-        print(f"Wake words: {WAKE_WORDS}")
+        print("Assistant running (Whisper GPU + Piper TTS).")
+        print(f"Input sample rate : {self.sample_rate} Hz | Frame: {FRAME_MS} ms")
+        print(f"Wake words        : {WAKE_WORDS}")
+        print(f"STT device        : {WHISPER_DEVICE} | compute: {WHISPER_COMPUTE}")
         print("==============================================")
 
         with sd.RawInputStream(
             samplerate=self.sample_rate,
-            blocksize=self.frame_samples,  
+            blocksize=self.frame_samples,
             dtype="int16",
             channels=1,
             callback=self._audio_callback,
         ):
             try:
                 while True:
-                    if self.state.mode == "ACTIVE" and (time.time() - self.state.last_activity) > ACTIVE_IDLE_TIMEOUT_SEC:
-                        self.tts.say("I'll wait. Say 'hey box' if you need me.")
+                    # Auto-sleep after idle timeout
+                    if (self.state.mode == "ACTIVE" and
+                            (time.time() - self.state.last_activity) > ACTIVE_IDLE_TIMEOUT_SEC):
+                        self.tts.say("Я подожду. Скажи 'hey box', если понадоблюсь.")
                         self._enter_sleep()
 
                     frame = self.audio_q.get()
 
+                    # ---- SLEEP mode: listen only for wake word ----
                     if self.state.mode == "SLEEP":
-                        out = self.capture.step(
-                            frame=frame, rec=self.rec_wake, max_utt_sec=MAX_UTT_SLEEP_SEC, want_partial=True
-                        )
-                        if out.partial and contains_phrase(out.partial, WAKE_WORDS):
-                            print(f"[STT partial] {out.partial}\n")
-                            self._enter_active()
-                            self.mic_gate_until = time.time() + 0.2
-                            continue
-                        if out.final and contains_phrase(out.final, WAKE_WORDS):
-                            print(f"[STT] {out.final}\n")
-                            self._enter_active()
-                            self.mic_gate_until = time.time() + 0.2
-                            continue
+                        pcm = self.capture.feed(frame, MAX_UTT_SLEEP_SEC)
+                        if pcm is not None:
+                            text = self._transcribe_utterance(pcm)
+                            print(f"[STT-wake] {text.lower().strip('.!?, ').capitalize()!r}")
+                            if text.lower().strip('.!?, ').capitalize() in WAKE_WORDS:
+                                print("WAKE WOD FOUND")
+                                self._enter_active()
+                                self.mic_gate_until = time.time() + 0.2
 
+                    # ---- ACTIVE mode: capture full utterance ----
                     else:
-                        out = self.capture.step(
-                            frame=frame, rec=self.rec_full, max_utt_sec=MAX_UTT_ACTIVE_SEC, want_partial=False
-                        )
-                        if out.final:
-                            user_text = out.final.strip()
-                            if user_text:
-                                print(f"[STT] {user_text}\n")
+                        pcm = self.capture.feed(frame, MAX_UTT_ACTIVE_SEC)
+                        if pcm is not None:
+                            text = self._transcribe_utterance(pcm).strip()
+                            if text:
+                                print(f"[STT] {text!r}")
                                 self.state.last_activity = time.time()
-                                if contains_phrase(user_text, SLEEP_PHRASES):
-                                    self.tts.say("Okay. Say 'hey box' if you need me.")
+                                if contains_phrase(text, SLEEP_PHRASES):
+                                    self.tts.say("Хорошо. Скажи 'hey box', если понадоблюсь.")
                                     self._enter_sleep()
                                 else:
-                                    self._respond_with_llm(user_text)
-                                    self.rec_full = KaldiRecognizer(self.vosk_model, self.sample_rate)
+                                    self._respond_with_llm(text)
 
             except KeyboardInterrupt:
-                print("\nExiting...")
+                print("\nExiting…")
             finally:
                 self.tts.stop()
+
 
 if __name__ == "__main__":
     VoiceAssistant().run_forever()
