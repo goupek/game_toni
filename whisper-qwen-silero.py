@@ -44,7 +44,7 @@ SILERO_SAMPLE_RATE = 48000
 WHISPER_MODEL_SIZE = "tiny"
 WHISPER_DEVICE = "cuda"
 WHISPER_COMPUTE = "float16"
-WHISPER_LANGUAGE = "en"   # set "ru" if your wake word / speech is Russian
+WHISPER_LANGUAGE = None   # set "ru" if your wake word / speech is Russian
 WHISPER_SAMPLE_RATE = 16000
 
 FRAME_MS = 20
@@ -117,7 +117,9 @@ class TTSWorker(threading.Thread):
         self.q: "queue.Queue[str]" = queue.Queue(maxsize=50)
         self._stop = threading.Event()
         self._model = None
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        # Force Silero to CPU
+        self.device = torch.device("cpu")
 
     def stop(self):
         self._stop.set()
@@ -137,7 +139,7 @@ class TTSWorker(threading.Thread):
             return
 
         print(f"[TTS] Loading Silero v5 from {SILERO_MODEL_PATH}...")
-        print(f"[TTS] Requested device: {self.device}")
+        print(f"[TTS] Forced device: {self.device}")
         t0 = time.time()
 
         try:
@@ -154,29 +156,9 @@ class TTSWorker(threading.Thread):
             print("[TTS] Warmup OK. Ready.")
 
         except Exception as e:
-            print(f"[TTS WARN] Failed to load Silero on {self.device}: {e}")
+            print(f"[TTS ERROR] Failed to load Silero on CPU: {e}")
             traceback.print_exc()
-
-            if self.device.type == "cuda":
-                try:
-                    print("[TTS WARN] Falling back to CPU...")
-                    self.device = torch.device("cpu")
-                    self._model = torch.package.PackageImporter(SILERO_MODEL_PATH).load_pickle("tts_models", "model")
-                    self._model.to(self.device)
-
-                    with torch.no_grad():
-                        _ = self._model.apply_tts(
-                            text="Привет.",
-                            speaker=SILERO_SPEAKER,
-                            sample_rate=SILERO_SAMPLE_RATE,
-                        )
-                    print("[TTS] CPU fallback OK. Ready.")
-                except Exception as e2:
-                    print(f"[TTS ERROR] CPU fallback also failed: {e2}")
-                    traceback.print_exc()
-                    self._model = None
-            else:
-                self._model = None
+            self._model = None
 
     def _sanitize(self, text: str) -> str:
         text = re.sub(r'[*_~`]', '', text)
@@ -250,7 +232,7 @@ class TTSWorker(threading.Thread):
             except Exception as e:
                 print(f"[TTS] Unhandled error: {e}")
                 traceback.print_exc()
-
+                
 # =========================
 # AUDIO HELPERS
 # =========================
@@ -385,14 +367,17 @@ class VoiceAssistant:
         print(f"[CUDA] torch.cuda.is_available() = {torch.cuda.is_available()}")
         if torch.cuda.is_available():
             try:
-                print(f"[CUDA] device = {torch.cuda.get_device_name(0)}")
+                 print(f"[CUDA] device = {torch.cuda.get_device_name(0)}")
             except Exception:
                 pass
 
-        if WHISPER_DEVICE != "cuda":
-            print("[WARN] WHISPER_DEVICE is not cuda.")
-        else:
+        if WHISPER_DEVICE == "cuda":
             print("[Init] Whisper is configured to use GPU.")
+        else:
+             print("[WARN] Whisper is not configured for GPU.")
+
+        print("[Init] Silero is forced to CPU.")
+
 
         self.tts = TTSWorker(self.audio_tracker)
         self.tts.start()
