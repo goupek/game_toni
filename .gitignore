@@ -1,1 +1,16 @@
+<<<<<<< HEAD
 venv
+=======
+models/
+Qwen3-TTS-0.6B-CustomVoice/
+
+__pycache__/
+.venv/
+.env
+
+.wav
+.mp3
+
+.audios
+.piper
+>>>>>>> 6ac2aa93f391a029db7a5e18838daebd553e2ed0
