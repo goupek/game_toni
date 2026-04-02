@@ -1,7 +1,7 @@
 """
 Jhony (Zhanibek) v2.0 - Russian Teacher for Toddlers
 MemGPT Architecture: inner monologue + two-phase tool loop
-Optimized for 1-2B models (qwen2.5:1.5b) on Jetson Orin Nano.
+Optimized for 1-2B models such as Gemma 3 1B/2B on Jetson Orin Nano.
 
 Architecture overview
 ─────────────────────
@@ -34,11 +34,11 @@ from memory_tools import MemoryToolExecutor
 from personality_system import PersonalityEngine
 from context_manager import ContextManager, InteractionContext
 from communication_tools import CommunicationExecutor, get_communication_tools
-from openai import OpenAI
 
-print(f"🚀 Initializing Jhony's Brain with {conf.OLLAMA_MODEL}...")
-client = OpenAI(base_url=f"{conf.OLLAMA_BASE_URL}/v1", api_key="ollama")
-MODEL_NAME = conf.OLLAMA_MODEL
+print(f"🚀 Initializing Jhony's Brain via llama.cpp at {conf.http_base_url()}...")
+client = None
+MODEL_NAME = conf.LLAMA_CPP_MODEL if conf.LLAMA_CPP_MODEL.lower() not in {"auto", "default"} else conf.LLAMA_CPP_FALLBACK_MODEL
+PREFER_TEXT_TOOL_CALLS = conf.should_use_text_tool_calls(MODEL_NAME)
 
 core_mem    = Memory()
 recall_mem  = RecallMemory(use_semantic=conf.USE_SEMANTIC_SEARCH)
@@ -270,7 +270,7 @@ def parse_text_tool_calls(content: str) -> list:
     Fallback for models that emit tool calls as plain text instead of structured API calls.
     Handles:
       Style A: {"name": "send_message", "arguments": {"message": "..."}}
-      Style B: Send_message\n{"message": "..."}   ← what qwen2.5 actually outputs
+      Style B: Send_message\n{"message": "..."}
       Style C: {"function": "send_message", "parameters": {...}}
     """
     results = []
@@ -307,14 +307,31 @@ def parse_text_tool_calls(content: str) -> list:
     return results
 
 
+def _ensure_model_ready(refresh: bool = False) -> str:
+    global MODEL_NAME, PREFER_TEXT_TOOL_CALLS
+
+    MODEL_NAME = conf.resolve_model(refresh=refresh)
+    PREFER_TEXT_TOOL_CALLS = conf.should_use_text_tool_calls(MODEL_NAME)
+    return MODEL_NAME
+
+
+def _get_client():
+    global client
+
+    if client is None:
+        client = conf.create_client()
+    return client
+
+
 # ---------------------------------------------------------------------------
 # Summarizer (for memory compression)
 # ---------------------------------------------------------------------------
 
 def summarize_for_archival(text: str) -> str:
     try:
-        resp = client.chat.completions.create(
-            model=MODEL_NAME,
+        model_name = _ensure_model_ready()
+        resp = _get_client().chat.completions.create(
+            model=model_name,
             messages=[
                 {"role": "system", "content":
                  "Summarize in 2–3 sentences: Russian words introduced, child's reactions, "
@@ -369,8 +386,8 @@ current_mode: str = ""
 current_game_hint: str = ""
 
 # Tool-calling compatibility:
-# Some Ollama models (e.g. gemma3:1b) return: "does not support tools".
-# We detect that once and permanently switch to "no tools" mode for this run.
+# Small Gemma models are more reliable with plain-text tool calls, and llama.cpp
+# will also reject structured tools if the server was started without --jinja.
 TOOLS_SUPPORTED: bool = True
 TOOLS_UNSUPPORTED_FLAGGED: bool = False
 
@@ -405,6 +422,7 @@ def chat(user_input: str) -> None:
     global TOOLS_SUPPORTED, TOOLS_UNSUPPORTED_FLAGGED
     timer = PerformanceTimer()
     timer.start()
+    model_name = _ensure_model_ready()
 
     # Compress recall memory if needed
     if recall_mem.get_count() > conf.RECALL_MEMORY_LIMIT:
@@ -431,7 +449,12 @@ def chat(user_input: str) -> None:
 
     def _is_tools_unsupported_error(err: Exception) -> bool:
         msg = str(err).lower()
-        return ("does not support tools" in msg) or ("support tools" in msg and "does not" in msg)
+        return (
+            ("does not support tools" in msg)
+            or ("support tools" in msg and "does not" in msg)
+            or ("tools param requires --jinja flag" in msg)
+            or ("tool_choice param requires --jinja flag" in msg)
+        )
 
     def _deliver_from_text(raw_text: str) -> None:
         """Set spoken_message from model text (optionally extracting tool-like text)."""
@@ -496,8 +519,8 @@ def chat(user_input: str) -> None:
     def _run_no_tools_completion() -> None:
         nonlocal spoken_message
         try:
-            resp = client.chat.completions.create(
-                model=MODEL_NAME,
+            resp = _get_client().chat.completions.create(
+                model=model_name,
                 messages=working_messages + [{"role": "system", "content": _toolless_system_nudge()}],
                 max_tokens=150,
             )
@@ -509,13 +532,13 @@ def chat(user_input: str) -> None:
     # ── Tool loop (max 3 iterations) ──────────────────────────────────────
     # Each iteration: the model either speaks (→ done) or calls memory tools
     # (→ execute and loop). A nudge is added on iteration 1 if still no speech.
-    if not TOOLS_SUPPORTED:
+    if PREFER_TEXT_TOOL_CALLS or not TOOLS_SUPPORTED:
         _run_no_tools_completion()
     else:
         for iteration in range(3):
             try:
-                resp = client.chat.completions.create(
-                    model=MODEL_NAME,
+                resp = _get_client().chat.completions.create(
+                    model=model_name,
                     messages=working_messages,
                     tools=all_tools,
                     tool_choice="auto",
@@ -526,7 +549,7 @@ def chat(user_input: str) -> None:
                 if _is_tools_unsupported_error(e):
                     TOOLS_SUPPORTED = False
                     if not TOOLS_UNSUPPORTED_FLAGGED:
-                        print("⚠️  This model does not support tools. Switching to no-tools mode for the rest of the run.")
+                        print("⚠️  Structured tools are unavailable. Switching to text-tool-call mode for the rest of the run.")
                         TOOLS_UNSUPPORTED_FLAGGED = True
                     _run_no_tools_completion()
                     break
@@ -596,8 +619,8 @@ def chat(user_input: str) -> None:
         mode = current_mode or getattr(conf, "JHONY_MODE", "chat")
         fallback_prompt = "Дай короткую подсказку по-русски. Не говори ответ." if mode == "game" else "Ответь по-русски коротко (3-6 слов)."
         try:
-            emer = client.chat.completions.create(
-                model=MODEL_NAME,
+            emer = _get_client().chat.completions.create(
+                model=model_name,
                 messages=working_messages + [{
                     "role": "user",
                     "content": fallback_prompt,
@@ -646,6 +669,8 @@ def main() -> None:
     global current_session_id, current_mode, current_game_hint
     args = _parse_args()
     current_session_id = datetime.now().strftime("%Y-%m-%d-%H%M")
+    conf.validate()
+    _ensure_model_ready(refresh=True)
     default_mode = getattr(conf, "JHONY_MODE", "chat")
     if args.mode is not None:
         current_mode = args.mode
@@ -669,6 +694,8 @@ def main() -> None:
                 pass
     print(f"🎓 Jhony (Zhanibek) Online — {'Helper (game mode)' if current_mode == 'game' else 'Ready to teach Russian (chat mode)'}!")
     print(f"   Model    : {MODEL_NAME}")
+    print(f"   Backend  : llama.cpp @ {conf.http_base_url()}")
+    print(f"   Tool mode: {'text tool calls' if PREFER_TEXT_TOOL_CALLS or not TOOLS_SUPPORTED else 'structured tools'}")
     print(f"   Mode     : {current_mode}")
     if current_mode == "game" and current_game_hint:
         print(f"   Game     : {current_game_hint[:60]}{'...' if len(current_game_hint) > 60 else ''}")

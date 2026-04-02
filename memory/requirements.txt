@@ -4,9 +4,10 @@
 
 # --- Core LLM Communication ---
 
-# OpenAI client library for communicating with the Ollama server.
+# OpenAI client library for communicating with the llama.cpp server.
 # The project is specifically written for version 1.x.
 openai>=1,<2
+requests
 
 # --- Semantic Search & Memory ---
 
