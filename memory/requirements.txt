@@ -1,0 +1,35 @@
+# This file lists the Python packages required to run the EDU-BOT project.
+# To install all of them, run this command in your terminal:
+# pip install -r requirements.txt
+
+# --- Core LLM Communication ---
+
+# OpenAI client library for communicating with the llama.cpp server.
+# The project is specifically written for version 1.x.
+openai>=1,<2
+requests
+
+# --- Semantic Search & Memory ---
+
+# A core library for numerical operations in Python.
+# It's a dependency for sentence-transformers and PyTorch.
+numpy
+
+# The main library for creating numerical "embeddings" that power semantic search.
+# This allows the chatbot to find memories based on meaning, not just keywords.
+sentence-transformers
+
+# pyarrow >= 14.0 removed PyExtensionType, which older transformers/datasets versions
+# rely on. Pinning below 14 prevents the "module 'pyarrow' has no attribute
+# 'PyExtensionType'" error that breaks the embedding model load.
+pyarrow<14.0
+
+# --- PyTorch (CPU Version) ---
+
+# PyTorch is the underlying machine learning framework for sentence-transformers.
+# By explicitly pointing to the CPU index, we avoid installation issues on systems
+# without a configured NVIDIA GPU and CUDA. This is the most stable approach.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
+torchvision
+torchaudio
