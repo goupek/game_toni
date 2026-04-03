@@ -1,0 +1,29 @@
+# Integrated assistant runtime:
+# Whisper STT + llama.cpp client + Silero TTS + local memory bridge
+
+# Core HTTP / client libs
+openai>=1,<2
+requests
+
+# Audio + signal processing
+numpy
+sounddevice
+webrtcvad-wheels
+
+# STT
+faster-whisper
+
+# TTS runtime
+torch
+
+# Text utilities
+transliterate
+
+# Local memory helpers
+pydantic>=2,<3
+
+# Optional: enable semantic search in assistant/config.py by setting
+# USE_SEMANTIC_SEARCH = True after installing these.
+# sentence-transformers
+# pyarrow<14.0
+# faiss-cpu
