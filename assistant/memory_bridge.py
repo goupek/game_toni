@@ -243,22 +243,45 @@ class PipelineMemoryBridge:
         if changed:
             self.core_mem.save()
 
+    def _compact_memory_summary(self) -> str:
+        parts: List[str] = []
+
+        human = self.core_mem.get_block("human")
+        if human:
+            human_lines = [
+                line.strip()
+                for line in human.value.splitlines()
+                if line.strip() and "unknown" not in line.lower()
+            ]
+            if human_lines:
+                parts.append("[KNOWN CHILD FACTS]")
+                parts.extend(f"- {line}" for line in human_lines[-8:])
+
+        learned = self.core_mem.get_block("learned_words")
+        if learned:
+            learned_lines = [line.strip() for line in learned.value.splitlines() if line.strip()]
+            if learned_lines:
+                parts.append("[LEARNED WORDS]")
+                parts.extend(f"- {line}" for line in learned_lines[-8:])
+
+        return "\n".join(parts)
+
     def _retrieve_relevant_context(self, query: str) -> str:
         expanded = expand_query_for_rag(query)
-        hits = self.recall_mem.search(expanded, limit=getattr(conf, "RAG_RECALL_K", 3))
-        facts = self.archival_mem.search(expanded, limit=getattr(conf, "RAG_ARCHIVAL_K", 3))
+        hits = self.recall_mem.search(expanded, limit=min(getattr(conf, "RAG_RECALL_K", 3), 2))
+        facts = self.archival_mem.search(expanded, limit=min(getattr(conf, "RAG_ARCHIVAL_K", 3), 2))
 
         if not hits and not facts:
             return ""
 
         parts = ["[RECENT CONTEXT]"]
         for hit in hits:
-            parts.append(f"  {hit['role']}: {hit['content'][:100]}")
+            parts.append(f"  {hit['role']}: {hit['content'][:80]}")
 
         if facts:
             parts.append("[KNOWN FACTS]")
             for fact in facts:
-                parts.append(f"  - {fact['content'][:100]}")
+                parts.append(f"  - {fact['content'][:80]}")
 
         return "\n".join(parts)
 
@@ -267,30 +290,24 @@ class PipelineMemoryBridge:
             return ""
 
         lines = ["[LAST DIALOGUE]"]
-        for message in list(self.session_history)[-getattr(conf, "RAG_LAST_N_TURNS", 4) :]:
-            lines.append(f"  {message['role']}: {message['content'][:120]}")
+        for message in list(self.session_history)[-2:]:
+            lines.append(f"  {message['role']}: {message['content'][:80]}")
         return "\n".join(lines)
 
     def _build_system_prompt(self, context_hint: str = "") -> str:
-        parts = [
-            self.base_system_prompt,
-            (
-                "MEMORY RULES:\n"
-                "- Only facts from the current user turn or the memory blocks are reliable.\n"
-                "- When the child shares new personal facts, call save_child_info.\n"
-                "- When a saved fact changes, call update_child_info.\n"
-                "- When the child successfully learns a Russian word, call record_learned_word.\n"
-                "- When you need grounded help from stored vocabulary or prior lessons, call consult_russian_teacher_manual.\n"
-                "- Use send_message for the final spoken reply whenever tools are available.\n"
-                "- Never invent memories or pretend to remember something that is not stored."
-            ),
-            self.personality.get_system_prompt_addition(),
-        ]
+        parts = [self.base_system_prompt]
 
         if context_hint.strip():
             parts.append(context_hint.strip())
 
-        parts.append(self.core_mem.compile())
+        memory_summary = self._compact_memory_summary()
+        if memory_summary:
+            parts.append(memory_summary)
+
+        parts.append(
+            "MEMORY: Use only stored facts or the current user message. "
+            "Reply directly in Russian Cyrillic unless you need to save or update memory."
+        )
         return "\n\n".join(part for part in parts if part and part.strip())
 
     def _build_working_messages(self, user_input: str, context_hint: str = "") -> List[Dict[str, str]]:
@@ -307,7 +324,6 @@ class PipelineMemoryBridge:
         if last_turns:
             working_messages.append({"role": "system", "content": last_turns})
 
-        working_messages.extend(list(self.session_history))
         return working_messages
 
     def _compress_memory_if_needed(self) -> int:
@@ -428,21 +444,82 @@ class PipelineMemoryBridge:
 
     def _toolless_system_nudge(self) -> str:
         return (
-            "TOOLS ARE NOT AVAILABLE THROUGH THE API.\n"
-            "You MUST write plain-text tool calls so the program can parse and execute them.\n"
-            "Allowed format only:\n"
-            "  save_child_info\n"
-            "  {\"content\":\"...\"}\n"
-            "  update_child_info\n"
-            "  {\"old_content\":\"...\",\"new_content\":\"...\"}\n"
-            "  record_learned_word\n"
-            "  {\"russian_word\":\"...\",\"english_word\":\"...\"}\n"
-            "  consult_russian_teacher_manual\n"
-            "  {\"query\":\"...\"}\n"
-            "  send_message\n"
-            "  {\"message\":\"...\"}\n"
-            "The final send_message is required. Its message must stay in Russian only and follow the tutor style rules."
+            "If you need memory actions, you may write plain-text tool calls in this format:\n"
+            "save_child_info\n"
+            "{\"content\":\"...\"}\n"
+            "update_child_info\n"
+            "{\"old_content\":\"...\",\"new_content\":\"...\"}\n"
+            "record_learned_word\n"
+            "{\"russian_word\":\"...\",\"english_word\":\"...\"}\n"
+            "consult_russian_teacher_manual\n"
+            "{\"query\":\"...\"}\n"
+            "send_message\n"
+            "{\"message\":\"...\"}\n"
+            "Prefer one direct Russian reply. Only use tool calls when needed."
         )
+
+    def _run_fast_turn(self, working_messages: List[Dict[str, Any]], user_input: str) -> Tuple[Optional[str], List[str]]:
+        used_tools: List[str] = []
+        response = self._chat_completion(
+            messages=working_messages
+            + [
+                {"role": "system", "content": self._toolless_system_nudge()},
+                {"role": "user", "content": user_input},
+            ],
+            max_tokens=self.response_max_tokens,
+        )
+
+        clean = _extract_text(response.get("content", ""))
+        parsed = parse_text_tool_calls(clean)
+
+        if parsed:
+            tool_feedback: List[str] = []
+            spoken_message: Optional[str] = None
+
+            for tool_call in parsed:
+                fn_name = tool_call.get("name", "")
+                args = tool_call.get("arguments") or {}
+                result, maybe_message = self._execute_tool(fn_name, args)
+                used_tools.append(fn_name)
+                if fn_name != "send_message":
+                    tool_feedback.append(f"{fn_name}: {result}")
+                if maybe_message:
+                    spoken_message = maybe_message
+
+            if spoken_message:
+                return spoken_message, used_tools
+
+            if tool_feedback:
+                follow_up = self._chat_completion(
+                    messages=working_messages
+                    + [{"role": "user", "content": user_input}]
+                    + [{"role": "system", "content": f"TOOL RESULT {item}"} for item in tool_feedback]
+                    + [
+                        {
+                            "role": "system",
+                            "content": "Now reply to the child in Russian Cyrillic. Be warm, direct, and not confused.",
+                        }
+                    ],
+                    max_tokens=self.response_max_tokens,
+                    temperature=0.4,
+                )
+                final_text = _extract_text(follow_up.get("content", ""))
+                final_calls = parse_text_tool_calls(final_text)
+                for tool_call in final_calls:
+                    if tool_call.get("name") == "send_message":
+                        candidate = (tool_call.get("arguments") or {}).get("message", "").strip()
+                        if self._is_valid_spoken_message(candidate):
+                            used_tools.append("send_message")
+                            return candidate, used_tools
+                if self._is_valid_spoken_message(final_text) and not final_text.startswith("{"):
+                    return final_text, used_tools
+
+            return None, used_tools
+
+        if self._is_valid_spoken_message(clean) and not clean.startswith("{"):
+            return clean, used_tools
+
+        return None, used_tools
 
     def _run_text_tool_loop(self, working_messages: List[Dict[str, Any]]) -> Tuple[Optional[str], List[str]]:
         spoken_message: Optional[str] = None
@@ -631,12 +708,13 @@ class PipelineMemoryBridge:
             return self._run_text_tool_loop(working_messages)
         return self._run_structured_tool_loop(working_messages)
 
-    def _run_emergency_fallback(self, working_messages: List[Dict[str, Any]]) -> str:
+    def _run_emergency_fallback(self, working_messages: List[Dict[str, Any]], user_input: str) -> str:
         message = self._chat_completion(
             messages=working_messages
             + [
+                {"role": "user", "content": user_input},
                 {
-                    "role": "user",
+                    "role": "system",
                     "content": (
                         "Reply to the child in Russian only, in the same warm tutor style. "
                         "Do not use tools in this answer."
@@ -671,10 +749,10 @@ class PipelineMemoryBridge:
         self.session_history.append({"role": "user", "content": user_input})
 
         working_messages = self._build_working_messages(user_input, context_hint=context_hint)
-        spoken_message, used_tools = self._run_tool_loop(working_messages)
+        spoken_message, used_tools = self._run_fast_turn(working_messages, user_input)
 
         if not spoken_message:
-            spoken_message = self._run_emergency_fallback(working_messages)
+            spoken_message = self._run_emergency_fallback(working_messages, user_input)
 
         spoken_message = spoken_message.strip()
         if not spoken_message:
