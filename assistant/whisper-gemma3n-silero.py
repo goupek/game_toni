@@ -1,5 +1,4 @@
 import io
-import json
 import traceback
 import os
 import queue
@@ -11,18 +10,16 @@ import wave
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import List, Optional
 from transliterate import translit
 
 import torch
 torch.cuda.empty_cache()
-import requests
 import sounddevice as sd
 import webrtcvad
 import numpy as np
 from faster_whisper import WhisperModel
 
-from config import conf
 from memory_bridge import PipelineMemoryBridge
 
 # =========================
@@ -58,25 +55,34 @@ MAX_UTT_ACTIVE_SEC = 20.0
 VAD_SUPPORTED_RATES = [16000, 48000, 32000, 8000]
 ACTIVE_IDLE_TIMEOUT_SEC = 60
 
-_LLAMA_MODEL_CACHE: Optional[str] = None
-
-
-def get_llama_model() -> str:
-    global _LLAMA_MODEL_CACHE
-
-    if _LLAMA_MODEL_CACHE:
-        return _LLAMA_MODEL_CACHE
-
-    try:
-        _LLAMA_MODEL_CACHE = conf.resolve_model()
-    except Exception:
-        _LLAMA_MODEL_CACHE = conf.LLAMA_CPP_FALLBACK_MODEL
-
-    return _LLAMA_MODEL_CACHE
-
-
-def get_llama_chat_url() -> str:
-    return f"{conf.openai_base_url()}/chat/completions"
+BOXY_SYSTEM_PROMPT = (
+    "You are Boxy, a warm and encouraging Russian language tutor for English speakers. "
+    "The user speaks English. You ALWAYS reply in Russian only, using Cyrillic script. "
+    "Never use Latin letters or transliteration in your response. "
+    "\n\n"
+    "YOUR PERSONALITY: "
+    "Patient, playful, and enthusiastic. Celebrate every attempt. "
+    "If the user tries a Russian word, praise them. "
+    "If they make a mistake, correct gently: say the right version once, then move on. "
+    "\n\n"
+    "RESPONSE LENGTH: "
+    "Always reply in 2 to 5 sentences. Never more, never less. "
+    "Each sentence must be short, under 12 words. "
+    "\n\n"
+    "STRICT OUTPUT RULES: "
+    "1. Plain Cyrillic text only. No lists, bullet points, numbers, colons, dashes, asterisks, markdown, or emojis. "
+    "2. Never explain grammar rules or use linguistic terms like nominative or accusative. "
+    "3. Never say a word means itself. "
+    "4. Never repeat the English word back if the user said it in English. "
+    "5. If you do not understand, ask one simple clarifying question in Russian. "
+    "6. Never answer in English, even if the user writes in English. "
+    "\n\n"
+    "RESPONSE PATTERNS: "
+    "For translation requests, give the Russian word, one short example, and invite repetition. "
+    "For yes or no questions, answer directly first, then one example. "
+    "For greetings or small talk, answer warmly and invite a short practice turn. "
+    "For unclear input, say you did not understand and ask them to repeat."
+)
 
 # =========================
 # TEXT HELPERS
@@ -98,58 +104,9 @@ def russify_text(text: str) -> str:
             return word
     return re.sub(r'[a-zA-Z]+', replace_english, text)
 
-# =========================
-# OLLAMA LOGIC (STREAMING)
-# =========================
-def llama_chat_stream(messages):
-    # Fix
-    messages = [
-        {
-            "role": "system",
-            "content": (
-                "You are a children's game assistant. "
-                "Give hints only. NEVER reveal the exact answer. "
-                "Speak simply and clearly."
-            ),
-        }
-    ] + messages
-
-    payload = {
-        "model": get_llama_model(),
-        "messages": messages,
-        "temperature": LLAMA_TEMPERATURE,
-        "max_tokens": LLAMA_NUM_PREDICT,
-        "stream": True,
-    }
-
-    print("[LLM] Sending request to llama.cpp server...")
-
-    with requests.post(
-        get_llama_chat_url(),
-        json=payload,
-        stream=True,
-    ) as r:
-        r.raise_for_status()
-        print("[LLM] Stream started, receiving tokens...")
-
-        for line in r.iter_lines():
-            if not line:
-                continue
-
-            # llama.cpp uses SSE format: "data: {...}"
-            if line.startswith(b"data: "):
-                line = line[len(b"data: "):]
-
-            if line == b"[DONE]":
-                break
-
-            data = json.loads(line)
-
-            delta = data["choices"][0]["delta"]
-            content = delta.get("content", "")
-
-            if content:
-                yield content
+def split_tts_sentences(text: str) -> List[str]:
+    parts = re.split(r"(?<=[.!?])\s+", text.strip())
+    return [part.strip() for part in parts if part.strip()]
 
 # =========================
 # AUDIO TRACKER
@@ -436,7 +393,6 @@ class VoiceAssistant:
         self.tts = TTSWorker(self.audio_tracker)
         self.tts.start()
         print("[Init] TTS worker started.")
-        print(f"[Init] LLM model: {get_llama_model()}")
 
         self.sample_rate = 16000
         self.frame_samples = int(self.sample_rate * FRAME_MS / 1000)
@@ -447,53 +403,21 @@ class VoiceAssistant:
 
         self.vad = webrtcvad.Vad(VAD_AGGRESSIVENESS)
         self.capture = VadAudioCapture(self.vad, self.sample_rate, FRAME_MS)
-        self.memory = PipelineMemoryBridge(self.base_dir)
-        print(f"[Init] Memory DBs: {self.base_dir}")
-
-        self.messages: List[Dict] = [
-            {"role": "system",
-             "content": (
-                "You are Boxy, a warm and encouraging Russian language tutor for English speakers. "
-                "The user speaks English. You ALWAYS reply in Russian only, using Cyrillic script. "
-                "Never use Latin letters or transliteration in your response. "
-                "\n\n"
-                "YOUR PERSONALITY: "
-                "Patient, playful, and enthusiastic. Celebrate every attempt. "
-                "If the user tries a Russian word, praise them. "
-                "If they make a mistake, correct gently: say the right version once, then move on. "
-                "\n\n"
-                "RESPONSE LENGTH: "
-                "Always reply in 2 to 5 sentences. Never more, never less. "
-                "Each sentence must be short — under 12 words. "
-                "\n\n"
-                "STRICT OUTPUT RULES: "
-                "1. Plain Cyrillic text only. No lists, bullet points, numbers, colons, dashes, asterisks, markdown, or emojis. "
-                "2. Never explain grammar rules or use linguistic terms like 'nominative' or 'accusative'. "
-                "3. Never say a word 'means itself' — яблоко means apple, not яблоко. "
-                "4. Never repeat the English word back — if they said 'apple', do not say 'apple' in your response. "
-                "5. If you do not understand the question, ask one simple clarifying question in Russian. "
-                "6. Never answer in English, even if the user writes in English. "
-                "\n\n"
-                "RESPONSE PATTERNS — use these templates as a guide: "
-                "\n"
-                "For translation requests ('how do you say X', 'what is X in Russian'): "
-                "Say: 'Это слово переводится как [слово]. [Short example sentence using the word]. Попробуй повторить!' "
-                "\n"
-                "For yes/no questions about Russian: "
-                "Give a direct short answer first, then one example. "
-                "\n"
-                "For greetings or small talk: "
-                "Respond warmly and naturally, then invite the user to practice a word or phrase. "
-                "\n"
-                "For gibberish, unclear input, or random sounds: "
-                "Say you did not understand and ask them to repeat in one short sentence. "
-                "\n\n"
-                "EXAMPLES OF GOOD RESPONSES: "
-                "'Это слово переводится как яблоко. Яблоко — красный фрукт. Попробуй сказать: яблоко!' "
-                "'Я не совсем понял. Можешь повторить ещё раз?' "
-                "\n\n"
-             )}
-        ]
+        self.memory = PipelineMemoryBridge(
+            self.base_dir,
+            base_system_prompt=BOXY_SYSTEM_PROMPT,
+            response_temperature=LLAMA_TEMPERATURE,
+            response_max_tokens=LLAMA_NUM_PREDICT,
+        )
+        print(f"[Init] LLM model: {self.memory.model_name}")
+        print(
+            "[Init] Memory tool mode: "
+            + ("text tool calls" if self.memory.prefer_text_tool_calls else "structured tools")
+        )
+        health = self.memory.get_health_report()
+        print(
+            f"[Init] Memory DBs: {self.base_dir} | recall={health['recall_count']} archival={health['archival_count']}"
+        )
         self.mic_gate_until = 0.0
         print("[Init] Assistant ready.")
 
@@ -529,12 +453,6 @@ class VoiceAssistant:
             except queue.Empty:
                 pass
 
-    def _trim_history(self, keep_last_pairs: int = 4):
-        sys_msg = self.messages[:1]
-        rest = self.messages[1:]
-        if len(rest) > keep_last_pairs * 2:
-            self.messages = sys_msg + rest[-keep_last_pairs * 2:]
-
     def _enter_sleep(self):
         self.state.mode = "SLEEP"
         self.state.last_activity = time.time()
@@ -554,36 +472,23 @@ class VoiceAssistant:
             print(f"[STT] {text}")
         return text
 
-    def _respond_with_llm(self, user_text: str):
-        memory_messages = self.memory.prepare_messages(user_text)
-        messages = memory_messages + [{"role": "user", "content": user_text}]
-        self._trim_history()
-        print(f"[USER] {user_text}")
-
-        full_response = ""
-        current_sentence = ""
-        sentence_enders = {".", "?", "!", "\n"}
-        chunks_received = 0
-
-        try:
-            for chunk in llama_chat_stream(messages):
-                full_response += chunk
-                current_sentence += chunk
-                chunks_received += 1
-
-                if any(ender in chunk for ender in sentence_enders):
-                    clean = re.sub(r'[*_~`]', '', current_sentence.strip())
-                    if clean:
-                        print(f"[LLM -> TTS] {clean!r}")
-                        self.tts.say(clean)
-                    current_sentence = ""
-
-            clean = re.sub(r'[*_~`]', '', current_sentence.strip())
+    def _queue_response_for_tts(self, response_text: str) -> None:
+        for sentence in split_tts_sentences(response_text):
+            clean = re.sub(r'[*_~`]', '', sentence.strip())
             if clean:
-                print(f"[LLM -> TTS] (remainder) {clean!r}")
+                print(f"[LLM -> TTS] {clean!r}")
                 self.tts.say(clean)
 
-            print(f"[LLM] Stream finished. Chunks received: {chunks_received}")
+    def _respond_with_llm(self, user_text: str):
+        print(f"[USER] {user_text}")
+        full_response = ""
+
+        try:
+            full_response = self.memory.generate_reply(user_text)
+            if full_response:
+                self._queue_response_for_tts(full_response)
+            else:
+                self.tts.say("Я задумалась и потеряла мысль.")
 
         except Exception as e:
             print(f"[LLM ERROR] {e}")
@@ -591,9 +496,6 @@ class VoiceAssistant:
             self.tts.say("Извини, у меня возникла проблема.")
 
         print(f"[ASSISTANT] {full_response.strip()}")
-        self.memory.remember_assistant(full_response.strip())
-        self.messages.append({"role": "assistant", "content": full_response.strip()})
-        self._trim_history()
         self.mic_gate_until = time.time() + 0.5
 
     def run_forever(self):

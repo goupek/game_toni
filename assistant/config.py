@@ -17,6 +17,9 @@ class Config:
     LLAMA_CPP_MODEL: str = field(default_factory=lambda: os.getenv("LLAMA_CPP_MODEL", "gemma-3-1b-it"))
     LLAMA_CPP_API_KEY: str = field(default_factory=lambda: os.getenv("LLAMA_CPP_API_KEY", "llama.cpp"))
     LLAMA_CPP_TIMEOUT_SECONDS: int = field(default_factory=lambda: int(os.getenv("LLAMA_CPP_TIMEOUT_SECONDS", "5")))
+    LLAMA_CPP_CHAT_TIMEOUT_SECONDS: int = field(
+        default_factory=lambda: int(os.getenv("LLAMA_CPP_CHAT_TIMEOUT_SECONDS", "120"))
+    )
     LLAMA_CPP_FALLBACK_MODEL: str = field(default_factory=lambda: os.getenv("LLAMA_CPP_FALLBACK_MODEL", "gemma-3-1b-it"))
     PREFER_TEXT_TOOL_CALLS_FOR_SMALL_GEMMA: bool = field(
         default_factory=lambda: _env_bool("PREFER_TEXT_TOOL_CALLS_FOR_SMALL_GEMMA", True)

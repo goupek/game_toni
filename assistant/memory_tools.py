@@ -123,6 +123,8 @@ class MemoryToolExecutor(BaseToolExecutor):
         block = self.memory.get_block("human")
         if not block:
             return "Error: human block not found."
+        if content in block.value:
+            return f"Already saved: {content}"
         success, msg = block.append("\n" + content)
         if success:
             self.memory.save()
