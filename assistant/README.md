@@ -22,5 +22,5 @@ runtime in one place.
 
 Notes:
 - The pipeline flow stays the same at the audio level: VAD -> Whisper -> llama.cpp -> Silero TTS.
-- The LLM default now targets `gemma-3-1b-it` from `config.py`.
+- The integrated assistant now uses the same LLM identifier as the original final pipeline: `7B`.
 - Memory databases are stored inside this `assistant/` directory.

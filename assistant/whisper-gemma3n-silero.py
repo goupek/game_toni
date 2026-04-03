@@ -34,6 +34,7 @@ SLEEP_PHRASES = ["go to sleep", "sleep", "stop listening", "goodbye", "bye"]
 LLAMA_NUM_PREDICT = 80
 LLAMA_TEMPERATURE = 0.5
 LLAMA_NUM_CTX = 512
+PIPELINE_LLM_MODEL = "7B"
 
 SILERO_MODEL_PATH = "models/silero/v5_ru.pt"
 SILERO_SPEAKER = "xenia"
@@ -408,6 +409,7 @@ class VoiceAssistant:
             base_system_prompt=BOXY_SYSTEM_PROMPT,
             response_temperature=LLAMA_TEMPERATURE,
             response_max_tokens=LLAMA_NUM_PREDICT,
+            model_name=PIPELINE_LLM_MODEL,
         )
         print(f"[Init] LLM model: {self.memory.model_name}")
         print(
