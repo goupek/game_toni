@@ -410,6 +410,7 @@ class VoiceAssistant:
             response_temperature=LLAMA_TEMPERATURE,
             response_max_tokens=LLAMA_NUM_PREDICT,
             model_name=PIPELINE_LLM_MODEL,
+            prefer_text_tool_calls=True,
         )
         print(f"[Init] LLM model: {self.memory.model_name}")
         print(

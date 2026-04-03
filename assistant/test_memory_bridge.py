@@ -54,6 +54,27 @@ class PipelineMemoryBridgeTests(unittest.TestCase):
             self.assertEqual(bridge.recall_mem.get_count(), 2)
             self.assertEqual(len(transport.payloads), 1)
 
+    def test_alias_can_force_text_tool_mode(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            transport = SequenceTransport(
+                [
+                    _message_response('send_message\n{"message":"Привет. Я тебя слышу."}')
+                ]
+            )
+
+            bridge = PipelineMemoryBridge(
+                Path(tmpdir),
+                base_system_prompt="You are Boxy.",
+                model_name="7B",
+                prefer_text_tool_calls=True,
+                completion_transport=transport,
+            )
+
+            reply = bridge.generate_reply("Hello")
+
+            self.assertTrue(bridge.prefer_text_tool_calls)
+            self.assertEqual(reply, "Привет. Я тебя слышу.")
+
     def test_text_tool_loop_can_consult_memory_then_answer(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             transport = SequenceTransport(
@@ -82,6 +103,28 @@ class PipelineMemoryBridgeTests(unittest.TestCase):
             second_payload = transport.payloads[1]
             serialized = json.dumps(second_payload, ensure_ascii=False)
             self.assertIn("TOOL RESULT consult_russian_teacher_manual", serialized)
+
+    def test_non_russian_output_is_rejected_and_retried(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            transport = SequenceTransport(
+                [
+                    _message_response("Gemma is a new generation of AI."),
+                    _message_response('send_message\n{"message":"Привет, Мендер. Я запомнила твоё имя."}'),
+                ]
+            )
+
+            bridge = PipelineMemoryBridge(
+                Path(tmpdir),
+                base_system_prompt="You are Boxy.",
+                model_name="7B",
+                prefer_text_tool_calls=True,
+                completion_transport=transport,
+            )
+
+            reply = bridge.generate_reply("Hello, my name is Mender.")
+
+            self.assertEqual(reply, "Привет, Мендер. Я запомнила твоё имя.")
+            self.assertEqual(len(transport.payloads), 2)
 
     def test_export_backup_writes_memory_snapshot(self):
         with tempfile.TemporaryDirectory() as tmpdir:

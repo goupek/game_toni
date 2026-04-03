@@ -51,6 +51,7 @@ _KNOWN_TOOLS = {
     "consult_russian_teacher_manual",
 }
 _JSON_RE = re.compile(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", re.DOTALL)
+_CYRILLIC_RE = re.compile(r"[А-Яа-яЁё]")
 
 
 def expand_query_for_rag(query: str) -> str:
@@ -106,6 +107,7 @@ class PipelineMemoryBridge:
         response_max_tokens: int = 80,
         summary_max_tokens: int = 120,
         model_name: Optional[str] = None,
+        prefer_text_tool_calls: Optional[bool] = None,
         completion_transport: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None,
     ):
         self.base_dir = Path(base_dir)
@@ -138,7 +140,10 @@ class PipelineMemoryBridge:
         self.session_history: deque[Dict[str, str]] = deque(maxlen=8)
 
         self.model_name = model_name or self._resolve_model()
-        self.prefer_text_tool_calls = conf.should_use_text_tool_calls(self.model_name)
+        if prefer_text_tool_calls is None:
+            self.prefer_text_tool_calls = conf.should_use_text_tool_calls(self.model_name)
+        else:
+            self.prefer_text_tool_calls = prefer_text_tool_calls
         self.tools_supported = True
 
     def _resolve_model(self) -> str:
@@ -407,11 +412,16 @@ class PipelineMemoryBridge:
                     return value.strip()
         return None
 
+    def _is_valid_spoken_message(self, message: str) -> bool:
+        return bool(_CYRILLIC_RE.search((message or "").strip()))
+
     def _execute_tool(self, fn_name: str, args: Dict[str, Any]) -> Tuple[str, Optional[str]]:
         if fn_name == "send_message":
             message = self._extract_spoken_message(args)
             if not message:
                 return "Failed: send_message produced no message.", None
+            if not self._is_valid_spoken_message(message):
+                return "Failed: send_message must be in Russian Cyrillic.", None
             return "Message delivered.", message
 
         return self.mem_exec.execute(fn_name, args), None
@@ -449,9 +459,16 @@ class PipelineMemoryBridge:
 
             parsed = parse_text_tool_calls(clean)
             if not parsed:
-                if not clean.startswith("{"):
+                if self._is_valid_spoken_message(clean) and not clean.startswith("{"):
                     spoken_message = clean
-                break
+                    break
+                working_messages.append(
+                    {
+                        "role": "system",
+                        "content": "That output was invalid. Reply in Russian Cyrillic only using the required send_message tool call.",
+                    }
+                )
+                continue
 
             working_messages.append({"role": "assistant", "content": clean})
             tool_feedback: List[str] = []
@@ -538,9 +555,16 @@ class PipelineMemoryBridge:
                     )
                     continue
 
-                if clean and not clean.startswith("{"):
+                if clean and self._is_valid_spoken_message(clean) and not clean.startswith("{"):
                     spoken_message = clean
-                break
+                    break
+                working_messages.append(
+                    {
+                        "role": "system",
+                        "content": "That output was invalid. Reply in Russian Cyrillic only and use send_message.",
+                    }
+                )
+                continue
 
             assistant_message: Dict[str, Any] = {"role": "assistant", "content": raw_text}
             normalized_tool_calls = []
@@ -626,9 +650,10 @@ class PipelineMemoryBridge:
         parsed = parse_text_tool_calls(clean)
         for tool_call in parsed:
             if tool_call.get("name") == "send_message":
-                return (tool_call.get("arguments") or {}).get("message", "").strip()
+                candidate = (tool_call.get("arguments") or {}).get("message", "").strip()
+                return candidate if self._is_valid_spoken_message(candidate) else ""
 
-        if clean.startswith("{"):
+        if clean.startswith("{") or not self._is_valid_spoken_message(clean):
             return ""
         return clean
 
