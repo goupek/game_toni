@@ -22,5 +22,5 @@ runtime in one place.
 
 Notes:
 - The pipeline flow stays the same at the audio level: VAD -> Whisper -> llama.cpp -> Silero TTS.
-- The integrated assistant now uses the same LLM identifier as the original final pipeline: `7B`.
+- The integrated assistant now targets `.../models/gemma/gemma-3-4b-it-q4_k_m7B`.
 - Memory databases are stored inside this `assistant/` directory.

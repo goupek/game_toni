@@ -34,7 +34,7 @@ SLEEP_PHRASES = ["go to sleep", "sleep", "stop listening", "goodbye", "bye"]
 LLAMA_NUM_PREDICT = 80
 LLAMA_TEMPERATURE = 0.5
 LLAMA_NUM_CTX = 512
-PIPELINE_LLM_MODEL = "7B"
+PIPELINE_LLM_MODEL = ".../models/gemma/gemma-3-4b-it-q4_k_m7B"
 
 SILERO_MODEL_PATH = "models/silero/v5_ru.pt"
 SILERO_SPEAKER = "xenia"
