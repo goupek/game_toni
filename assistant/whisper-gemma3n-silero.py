@@ -55,6 +55,9 @@ MAX_UTT_SLEEP_SEC = 3.0
 MAX_UTT_ACTIVE_SEC = 20.0
 VAD_SUPPORTED_RATES = [16000, 48000, 32000, 8000]
 ACTIVE_IDLE_TIMEOUT_SEC = 60
+WAKE_MIC_GATE_SEC = 0.5
+
+_ACTIONABLE_TEXT_RE = re.compile(r"[A-Za-zА-Яа-яЁё0-9]")
 
 BOXY_SYSTEM_PROMPT = (
     "You are Boxy, a warm and encouraging Russian language tutor for English speakers. "
@@ -108,6 +111,10 @@ def russify_text(text: str) -> str:
 def split_tts_sentences(text: str) -> List[str]:
     parts = re.split(r"(?<=[.!?])\s+", text.strip())
     return [part.strip() for part in parts if part.strip()]
+
+
+def is_actionable_user_text(text: str) -> bool:
+    return bool(_ACTIONABLE_TEXT_RE.search((text or "").strip()))
 
 # =========================
 # AUDIO TRACKER
@@ -180,22 +187,22 @@ class TTSWorker(threading.Thread):
         return bool(re.search('[а-яА-ЯёЁ]', text))
 
     def _synthesize_and_play(self, text: str):
-        self._lazy_init()
-        if self._model is None:
-            return
-
-        text = self._sanitize(text)
-        if not text:
-            return
-
-        text = russify_text(text)
-
-        if not self._has_cyrillic(text):
-            print(f"[TTS] Skipping non-Russian text: {text!r}")
-            return
-
+        self.audio_tracker.active.set()
         try:
-            self.audio_tracker.active.set()
+            self._lazy_init()
+            if self._model is None:
+                return
+
+            text = self._sanitize(text)
+            if not text:
+                return
+
+            text = russify_text(text)
+
+            if not self._has_cyrillic(text):
+                print(f"[TTS] Skipping non-Russian text: {text!r}")
+                return
+
             print(f"[TTS] Synthesizing on {self.device}: {text!r}")
             t0 = time.time()
 
@@ -466,6 +473,7 @@ class VoiceAssistant:
         self.state.mode = "ACTIVE"
         self.state.last_activity = time.time()
         self.capture.reset()
+        self.mic_gate_until = time.time() + WAKE_MIC_GATE_SEC
         print("[STATE] -> ACTIVE")
         self.tts.say(GREETING)
 
@@ -535,7 +543,6 @@ class VoiceAssistant:
                             if text and contains_phrase(text, WAKE_WORDS):
                                 print(f"[Wake detected] {text}")
                                 self._enter_active()
-                                self.mic_gate_until = time.time() + 0.2
                                 continue
 
                     else:
@@ -546,6 +553,9 @@ class VoiceAssistant:
                         if out.final_audio:
                             user_text = self._transcribe(out.final_audio)
                             if user_text:
+                                if not is_actionable_user_text(user_text):
+                                    print(f"[STT] Ignoring unsupported text: {user_text!r}")
+                                    continue
                                 self.state.last_activity = time.time()
                                 if contains_phrase(user_text, SLEEP_PHRASES):
                                     self.tts.say("Хорошо. Скажи привет бокс, если понадоблюсь.")
