@@ -1,0 +1,40 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# pipeline_mem/g4-e2b-boxy_streaming.py
+# Jetson Orin Nano (aarch64, Python 3.10)
+#
+# NOTE: torch, torchaudio, numpy, sounddevice, webrtcvad, requests are already
+# installed via the Jetson system image / previous setup.  They are listed here
+# for documentation; pip will skip them if the installed version satisfies the
+# constraint.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Pipeline: STT ────────────────────────────────────────────────────────────
+faster-whisper>=1.0.0          # Whisper STT via CTranslate2
+
+# ── Pipeline: TTS ────────────────────────────────────────────────────────────
+# Silero TTS is loaded as a torch.package (.pt file) — no pip install needed.
+# torch and torchaudio are required (already installed as Jetson wheels).
+
+# ── Pipeline: audio I/O & VAD ────────────────────────────────────────────────
+sounddevice>=0.4.0             # mic capture via PortAudio
+webrtcvad>=2.0.10              # voice activity detection
+
+# ── Pipeline: LLM HTTP client ────────────────────────────────────────────────
+requests>=2.25.0               # streaming HTTP to llama.cpp server
+
+# ── Pipeline: text helpers ───────────────────────────────────────────────────
+transliterate>=1.10.2          # Cyrillic transliteration for TTS russify
+
+# ── Memory system: LLM backend client (config.py / create_client) ────────────
+openai>=1.0.0                  # OpenAI-compatible client for llama.cpp
+
+# ── Numeric / array (already on Jetson, listed for completeness) ─────────────
+# numpy: MUST stay <2.0 — Jetson torch 2.0.1 was compiled against numpy 1.x
+numpy>=1.21.0,<2.0
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OPTIONAL — semantic / vector search (disabled by default: use_semantic=False)
+# Uncomment only after verifying pyarrow / datasets stack is compatible.
+# ─────────────────────────────────────────────────────────────────────────────
+# sentence-transformers>=3.0.0  # embedding model (all-MiniLM-L6-v2, ~80 MB)
+# faiss-cpu>=1.7.4              # fast vector index (or faiss-gpu for Jetson CUDA)

@@ -1,5 +1,7 @@
 import json
+import os
 import queue
+import sys
 import threading
 import time
 import re
@@ -7,6 +9,7 @@ import subprocess
 import traceback
 from collections import deque
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Dict, List, Optional
 
 from transliterate import translit
@@ -18,6 +21,25 @@ import webrtcvad
 from faster_whisper import WhisperModel
 
 torch.cuda.empty_cache()
+
+# =========================
+# MEMORY SYSTEM SETUP
+# =========================
+_MEM_SRC = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'memory', 'new_mem')
+if _MEM_SRC not in sys.path:
+    sys.path.insert(0, _MEM_SRC)
+
+MEMORY_AVAILABLE = False
+try:
+    from memory_system import Memory, RecallMemory, ArchivalMemory
+    from context_manager import ContextManager, InteractionContext
+    MEMORY_AVAILABLE = True
+    print("[Memory] Memory system loaded.")
+except ImportError as _e:
+    print(f"[Memory] Memory system unavailable: {_e}. Running without memory.")
+
+# Memory DB files go here (persisted alongside the memory source)
+MEMORY_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'memory', 'data')
 
 # =========================
 # CONFIGURATION
@@ -69,6 +91,11 @@ MAX_UTT_ACTIVE_SEC = 20.0
 VAD_SUPPORTED_RATES = [16000, 48000, 32000, 8000]
 ACTIVE_IDLE_TIMEOUT_SEC = 60
 
+# Memory tunables
+RECALL_MEMORY_LIMIT = 40   # compress to archival after this many stored turns
+RAG_RECALL_K = 3           # recall hits to inject into system prompt
+RAG_ARCHIVAL_K = 2         # archival hits to inject into system prompt
+
 # =========================
 # TEXT HELPERS
 # =========================
@@ -96,6 +123,139 @@ def russify_text(text: str) -> str:
 
 def strip_markdown(text: str) -> str:
     return re.sub(r'[*_~`]', '', text)
+
+
+# =========================
+# MEMORY HELPERS
+# Runs after the LLM call to avoid KV-cache invalidation on the same turn.
+# RAG retrieval runs before the LLM call (reads-only, no cache impact).
+# =========================
+
+# Regex patterns for rule-based fact extraction
+_NAME_RE      = re.compile(r'\bmy name is\s+([A-Za-z]+)', re.IGNORECASE)
+_CALL_ME_RE   = re.compile(r'\bcall me\s+([A-Za-z]+)\b', re.IGNORECASE)
+_LOVE_RE      = re.compile(r'\b(i love|i like|my favou?rite)\s+([^,.!?\n]{3,50})', re.IGNORECASE)
+_DONT_LIKE_RE = re.compile(r"\bi don'?t like\s+([^,.!?\n]{3,40})", re.IGNORECASE)
+_HAVE_RE      = re.compile(r'\bi have (?:a |an )?([A-Za-z]+(?: [A-Za-z]+)?)\b', re.IGNORECASE)
+_FAMILY_RE    = re.compile(
+    r'\bmy (mom|mother|dad|father|sister|brother|grandma|grandpa)\s+(?:is\s+)?([^,.!?\n]{2,40})',
+    re.IGNORECASE,
+)
+_AGE_RE       = re.compile(r"\bI'?m\s+(\d{1,2})\s*years?\s*old\b", re.IGNORECASE)
+
+# Query expansion: "what do you remember about me?" → broader search terms
+_REMEMBER_RE  = re.compile(
+    r"what do you remember|what'?s? my name|do you remember me|remember about me|"
+    r"what do you know about me|tell me what you know",
+    re.IGNORECASE,
+)
+
+
+def _expand_query(query: str) -> str:
+    if _REMEMBER_RE.search(query):
+        return query + " name interests likes pets family"
+    return query
+
+
+def auto_extract_facts(user_input: str, core_mem) -> None:
+    """
+    Extract personal facts from user text using regex patterns and write
+    them into the core memory 'human' block.  Pure Python — no extra LLM call.
+    Called AFTER the LLM response to avoid invalidating the KV-cache prefix.
+    """
+    block = core_mem.get_block("human")
+    if not block:
+        return
+
+    changed = False
+    facts = []
+
+    m = _NAME_RE.search(user_input)
+    if m:
+        name = m.group(1).capitalize()
+        if name.lower() not in {"a", "an", "the", "my", "your", "not"} and name not in block.value:
+            success, _ = block.replace_line_by_key("User's name:", f"User's name: {name}.")
+            if success:
+                changed = True
+                print(f"[Memory] Auto-saved name: {name}")
+
+    m = _CALL_ME_RE.search(user_input)
+    if m:
+        name = m.group(1).capitalize()
+        if name.lower() not in {"a", "an", "the", "my", "your", "not"} and name not in block.value:
+            success, _ = block.replace_line_by_key("User's name:", f"User's name: {name}.")
+            if success:
+                changed = True
+                print(f"[Memory] Auto-saved name (call me): {name}")
+
+    for m in _LOVE_RE.finditer(user_input):
+        interest = m.group(2).strip().rstrip(".,!?")
+        entry = f"User likes: {interest}."
+        if entry not in block.value:
+            facts.append(entry)
+
+    for m in _DONT_LIKE_RE.finditer(user_input):
+        dislike = m.group(1).strip().rstrip(".,!?")
+        entry = f"User dislikes: {dislike}."
+        if entry not in block.value:
+            facts.append(entry)
+
+    m = _HAVE_RE.search(user_input)
+    if m:
+        thing = m.group(1)
+        entry = f"User has: {thing}."
+        if entry not in block.value:
+            facts.append(entry)
+
+    for m in _FAMILY_RE.finditer(user_input):
+        role = m.group(1).lower()
+        desc = m.group(2).strip().rstrip(".,!?")
+        entry = f"User family: {role} — {desc}."
+        if entry not in block.value:
+            facts.append(entry)
+
+    m = _AGE_RE.search(user_input)
+    if m:
+        age = m.group(1)
+        entry = f"User age: {age} years."
+        if entry not in block.value:
+            facts.append(entry)
+
+    for fact in facts:
+        success, _ = block.append(f"\n{fact}")
+        if success:
+            changed = True
+            print(f"[Memory] Auto-saved: {fact}")
+
+    if changed:
+        core_mem.save()
+
+
+def retrieve_relevant_context(user_input: str, recall_mem, archival_mem) -> str:
+    """
+    Fast text-based RAG: search recall + archival memory for context relevant
+    to the current user query.  Uses SQL LIKE — no embeddings, no blocking.
+    Returns a compact string to inject into the system prompt.
+    """
+    try:
+        expanded = _expand_query(user_input)
+        hits  = recall_mem.search(expanded, limit=RAG_RECALL_K)
+        facts = archival_mem.search(expanded, limit=RAG_ARCHIVAL_K)
+        if not hits and not facts:
+            return ""
+        parts = []
+        if hits:
+            parts.append("[RECENT CONTEXT]")
+            for h in hits:
+                parts.append(f"  {h['role']}: {h['content'][:100]}")
+        if facts:
+            parts.append("[KNOWN FACTS]")
+            for f in facts:
+                parts.append(f"  - {f['content'][:100]}")
+        return "\n".join(parts)
+    except Exception as e:
+        print(f"[Memory] RAG error: {e}")
+        return ""
 
 
 # =========================
@@ -447,6 +607,29 @@ class VoiceAssistant:
         self.audio_q: "queue.Queue[bytes]" = queue.Queue(maxsize=400)
         self.audio_tracker = AudioStateTracker()
 
+        # ── Memory system ──────────────────────────────────────────────────
+        self.core_mem    = None
+        self.recall_mem  = None
+        self.archival_mem = None
+        self.ctx_mgr     = None
+        if MEMORY_AVAILABLE:
+            try:
+                os.makedirs(MEMORY_DIR, exist_ok=True)
+                self.core_mem     = Memory(db_path=os.path.join(MEMORY_DIR, "boxy_core.db"))
+                self.recall_mem   = RecallMemory(
+                    db_path=os.path.join(MEMORY_DIR, "boxy_recall.db"),
+                    use_semantic=False,
+                )
+                self.archival_mem = ArchivalMemory(
+                    db_path=os.path.join(MEMORY_DIR, "boxy_archival.db"),
+                    use_semantic=False,
+                )
+                self.ctx_mgr = ContextManager()
+                print("[Memory] Memory system initialized.")
+            except Exception as e:
+                print(f"[Memory] Init error: {e}. Running without memory.")
+                self.core_mem = self.recall_mem = self.archival_mem = self.ctx_mgr = None
+
         print(f"[CUDA] torch.cuda.is_available() = {torch.cuda.is_available()}")
         if torch.cuda.is_available():
             try:
@@ -472,29 +655,54 @@ class VoiceAssistant:
         self.capture = VadAudioCapture(self.vad, self.sample_rate, FRAME_MS)
 
         self.messages: List[Dict[str, str]] = [
-            {
-                "role": "system",
-                "content": (
-                    "You are Boxy, a friendly Russian tutor. The user speaks English or Russian. "
-                    "ALWAYS reply in Russian using Cyrillic ONLY. "
-                    "NEVER use Latin letters. NEVER reply in English, even if the user speaks English. "
-                    "\n\n"
-                    "STRICT RULES: "
-                    "1. Plain Cyrillic only — no markdown, lists, emojis, or asterisks. "
-                    "2. Reply in exactly 2 short sentences. No more. "
-                    "3. NEVER ask questions unless the user asked one first. "
-                    "4. For translation requests: give the Russian word, then one example sentence. "
-                    "5. If the input is unclear or gibberish: say only 'Я не понял. Можешь повторить?' "
-                    "\n\n"
-                    "EXAMPLES: "
-                    "User: 'how do you say apple' → 'Яблоко. Я люблю яблоки.' "
-                    "User: 'hello' → 'Привет! Рад тебя слышать.' "
-                    "User: gibberish → 'Я не понял. Можешь повторить?' "
-                ),
-            }
+            {"role": "system", "content": self._build_system_prompt()}
         ]
         self.mic_gate_until = 0.0
         print("[Init] Assistant ready.")
+
+    # ── System prompt builder ──────────────────────────────────────────────
+    def _build_system_prompt(self, rag_context: str = "") -> str:
+        """
+        Build the system prompt from the fixed personality rules, the current
+        core memory blocks (persona / human / learned_words), the context-
+        manager time hint, and any RAG context retrieved for this turn.
+
+        Keep the hardcoded rules first so the llama.cpp KV-cache can reuse the
+        prefix on turns where memory hasn't changed.
+        """
+        base = (
+            "You are Boxy, a friendly Russian tutor. The user speaks English or Russian. "
+            "ALWAYS reply in Russian using Cyrillic ONLY. "
+            "NEVER use Latin letters. NEVER reply in English, even if the user speaks English. "
+            "\n\n"
+            "STRICT RULES: "
+            "1. Plain Cyrillic only — no markdown, lists, emojis, or asterisks. "
+            "2. Reply in exactly 2 short sentences. No more. "
+            "3. NEVER ask questions unless the user asked one first. "
+            "4. For translation requests: give the Russian word, then one example sentence. "
+            "5. If the input is unclear or gibberish: say only 'Я не понял. Можешь повторить?' "
+            "\n\n"
+            "EXAMPLES: "
+            "User: 'how do you say apple' → 'Яблоко. Я люблю яблоки.' "
+            "User: 'hello' → 'Привет! Рад тебя слышать.' "
+            "User: gibberish → 'Я не понял. Можешь повторить?' "
+        )
+
+        # Core memory blocks (persona, human facts, learned words)
+        if self.core_mem:
+            base += "\n\n" + self.core_mem.compile()
+
+        # Time-since-last-interaction hint
+        if self.ctx_mgr:
+            ctx_str = self.ctx_mgr.get_context_string()
+            if ctx_str:
+                base += ctx_str
+
+        # Per-turn RAG context (retrieved before the LLM call)
+        if rag_context:
+            base += "\n\n" + rag_context
+
+        return base
 
     def _pick_input_rate(self) -> int:
         for sr in VAD_SUPPORTED_RATES:
@@ -560,6 +768,18 @@ class VoiceAssistant:
         return text
 
     def _respond_with_llm(self, user_text: str):
+        # ── Pre-LLM: RAG only (reads, no DB writes → KV-cache stays valid) ──
+        rag_context = ""
+        if self.recall_mem and self.archival_mem:
+            rag_context = retrieve_relevant_context(user_text, self.recall_mem, self.archival_mem)
+
+        # Update context-manager timestamp for time hint in prompt
+        if self.ctx_mgr:
+            self.ctx_mgr.update_interaction(InteractionContext(last_interaction=datetime.now()))
+
+        # Rebuild system prompt with current memory + RAG for this turn
+        self.messages[0] = {"role": "system", "content": self._build_system_prompt(rag_context)}
+
         user_msg = {"role": "user", "content": user_text}
         self.messages.append(user_msg)
         self._trim_history()
@@ -599,6 +819,16 @@ class VoiceAssistant:
             self.messages.append({"role": "assistant", "content": assistant_text})
             self._trim_history()
 
+            # ── Post-LLM: write to memory async (does not block next turn) ──
+            # auto_extract_facts runs here (not pre-LLM) so the KV-cache prefix
+            # is not invalidated on the same turn the fact is first written.
+            if self.recall_mem:
+                threading.Thread(
+                    target=self._async_memory_ops,
+                    args=(user_text, assistant_text),
+                    daemon=True,
+                ).start()
+
         except Exception as e:
             print(f"[LLM ERROR] {e}")
             traceback.print_exc()
@@ -611,11 +841,44 @@ class VoiceAssistant:
 
         self.mic_gate_until = time.time() + 0.5
 
+    def _async_memory_ops(self, user_text: str, assistant_text: str):
+        """
+        Runs in a daemon thread after each successful LLM turn.
+        Order matters:
+          1. auto_extract_facts — writes to core memory (fast regex)
+          2. recall insert — stores the turn for future RAG
+          3. optional compression — moves old recall to archival
+        """
+        try:
+            # 1. Fact extraction (modifies core_mem; safe post-LLM)
+            if self.core_mem:
+                auto_extract_facts(user_text, self.core_mem)
+
+            # 2. Store turn in recall memory (deferred embedding if semantic enabled)
+            self.recall_mem.insert("user", user_text, defer_embedding=True)
+            self.recall_mem.insert("assistant", assistant_text, defer_embedding=True)
+
+            # 3. Compress old recall into archival if over limit
+            if self.recall_mem.get_count() > RECALL_MEMORY_LIMIT:
+                keep = max(10, RECALL_MEMORY_LIMIT - 15)
+                n = self.recall_mem.compress_old_memories(
+                    lambda text: text[:300],   # simple truncation, no extra LLM call
+                    self.archival_mem,
+                    keep_recent=keep,
+                )
+                if n > 0:
+                    print(f"[Memory] Compressed {n} old recall entries into archival.")
+
+        except Exception as e:
+            print(f"[Memory] Async ops error: {e}")
+            traceback.print_exc()
+
     def run_forever(self):
         print("==============================================")
         print("Assistant running.")
         print(f"Sample rate: {self.sample_rate} Hz | Frame: {FRAME_MS} ms")
         print(f"Wake words: {WAKE_WORDS}")
+        print(f"Memory: {'enabled' if self.core_mem else 'disabled'}")
         print("==============================================")
 
         with sd.RawInputStream(
