@@ -14,6 +14,7 @@ from typing import List, Dict, Optional
 from transliterate import translit
 
 import torch
+torch.cuda.empty_cache()
 import requests
 import sounddevice as sd
 import webrtcvad
@@ -25,20 +26,20 @@ from faster_whisper import WhisperModel
 # =========================
 MIC_DEVICE = 24
 
-OLLAMA_URL = "http://localhost:11434"
-OLLAMA_MODEL = "qwen3.5:2b"
+# OLLAMA_URL = "http://localhost:11434"
+# OLLAMA_MODEL = "qwen3.5:2b"
 
 WAKE_WORDS = ["hey box", "okay box", "hi box", "box box"]
 GREETING = "Привет, чем я могу тебе помочь?"
 SLEEP_PHRASES = ["go to sleep", "sleep", "stop listening", "goodbye", "bye"]
 
-OLLAMA_NUM_PREDICT = 150
-OLLAMA_TEMPERATURE = 0.4
-OLLAMA_NUM_CTX = 512
+LLAMA_NUM_PREDICT = 80
+LLAMA_TEMPERATURE = 0.5
+LLAMA_NUM_CTX = 512
 
 SILERO_MODEL_PATH = "models/silero/v5_ru.pt"
 SILERO_SPEAKER = "xenia"
-SILERO_SAMPLE_RATE = 48000
+SILERO_SAMPLE_RATE = 8000
 
 # Whisper config
 WHISPER_MODEL_SIZE = "tiny"
@@ -79,25 +80,43 @@ def russify_text(text: str) -> str:
 # =========================
 # OLLAMA LOGIC (STREAMING)
 # =========================
-def ollama_chat_stream(messages: List[Dict]):
+def llama_chat_stream(messages):
     payload = {
-        "model": OLLAMA_MODEL,
-        "messages": messages,
+        "model": "gemma-3-4b-it-q4_k_m",
+        "messages": messages,       # real system prompt + full conversation history
+        "temperature": LLAMA_TEMPERATURE,
+        "max_tokens": LLAMA_NUM_PREDICT,
         "stream": True,
-        "options": {
-            "num_predict": OLLAMA_NUM_PREDICT,
-            "temperature": OLLAMA_TEMPERATURE,
-            "num_ctx": OLLAMA_NUM_CTX,
-        },
     }
-    print(f"[LLM] Sending request to Ollama ({OLLAMA_MODEL})...")
-    with requests.post(f"{OLLAMA_URL}/api/chat", json=payload, stream=True) as r:
+
+    print("[LLM] Sending request to llama.cpp server...")
+
+    with requests.post(
+        "http://localhost:8080/v1/chat/completions",
+        json=payload,
+        stream=True,
+    ) as r:
         r.raise_for_status()
         print("[LLM] Stream started, receiving tokens...")
+
         for line in r.iter_lines():
-            if line:
-                data = json.loads(line)
-                yield data.get("message", {}).get("content", "")
+            if not line:
+                continue
+
+            # llama.cpp uses SSE format: "data: {...}"
+            if line.startswith(b"data: "):
+                line = line[len(b"data: "):]
+
+            if line == b"[DONE]":
+                break
+
+            data = json.loads(line)
+
+            delta = data["choices"][0]["delta"]
+            content = delta.get("content", "")
+
+            if content:
+                yield content
 
 # =========================
 # AUDIO TRACKER
@@ -178,10 +197,10 @@ class TTSWorker(threading.Thread):
         if not text:
             return
 
-        text = russify_text(text)
-
+        # Do NOT transliterate — if the LLM hallucinated English, speaking
+        # Cyrillic-ised noise is worse than silence. Fail fast instead.
         if not self._has_cyrillic(text):
-            print(f"[TTS] Skipping non-Russian text: {text!r}")
+            print(f"[TTS] Skipping non-Russian text (fail-fast): {text!r}")
             return
 
         try:
@@ -281,6 +300,7 @@ class WhisperSTT:
 
             text = " ".join(seg.text.strip() for seg in segments).strip()
             print(f"[Whisper] detected_language={info.language} prob={info.language_probability:.3f}")
+            print(f"[Whisper] detected text={text}")
             return text
         except Exception as e:
             print(f"[Whisper ERROR] {e}")
@@ -383,7 +403,7 @@ class VoiceAssistant:
         self.tts.start()
         print("[Init] TTS worker started.")
 
-        self.sample_rate = 32000
+        self.sample_rate = 16000
         self.frame_samples = int(self.sample_rate * FRAME_MS / 1000)
         self.frame_bytes = self.frame_samples * 2
         print(f"[Init] Mic sample rate: {self.sample_rate} Hz")
@@ -508,7 +528,7 @@ class VoiceAssistant:
         chunks_received = 0
 
         try:
-            for chunk in ollama_chat_stream(self.messages):
+            for chunk in llama_chat_stream(messages):
                 full_response += chunk
                 current_sentence += chunk
                 chunks_received += 1

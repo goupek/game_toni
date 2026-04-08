@@ -14,6 +14,7 @@ from typing import List, Dict, Optional
 from transliterate import translit
 
 import torch
+torch.cuda.empty_cache()
 import requests
 import sounddevice as sd
 import webrtcvad
@@ -25,20 +26,20 @@ from faster_whisper import WhisperModel
 # =========================
 MIC_DEVICE = 24
 
-OLLAMA_URL = "http://localhost:11434"
-OLLAMA_MODEL = "qwen3.5:2b"
+# OLLAMA_URL = "http://localhost:11434"
+# OLLAMA_MODEL = "qwen3.5:2b"
 
 WAKE_WORDS = ["hey box", "okay box", "hi box", "box box"]
 GREETING = "Привет, чем я могу тебе помочь?"
 SLEEP_PHRASES = ["go to sleep", "sleep", "stop listening", "goodbye", "bye"]
 
-OLLAMA_NUM_PREDICT = 150
-OLLAMA_TEMPERATURE = 0.4
-OLLAMA_NUM_CTX = 512
+LLAMA_NUM_PREDICT = 80
+LLAMA_TEMPERATURE = 0.5
+LLAMA_NUM_CTX = 512
 
 SILERO_MODEL_PATH = "models/silero/v5_ru.pt"
 SILERO_SPEAKER = "xenia"
-SILERO_SAMPLE_RATE = 48000
+SILERO_SAMPLE_RATE = 8000
 
 # Whisper config
 WHISPER_MODEL_SIZE = "tiny"
@@ -77,27 +78,40 @@ def russify_text(text: str) -> str:
     return re.sub(r'[a-zA-Z]+', replace_english, text)
 
 # =========================
-# OLLAMA LOGIC (STREAMING)
+# LLM LOGIC
 # =========================
-def ollama_chat_stream(messages: List[Dict]):
+def looks_like_russian(text: str) -> bool:
+    """Return True only if text is non-empty, has Cyrillic chars, and no Latin letters."""
+    text = re.sub(r'[*_~`]', '', text).strip()
+    return (
+        bool(text)
+        and not re.search(r'[A-Za-z]', text)
+        and bool(re.search(r'[А-Яа-яЁё]', text))
+    )
+
+def llama_chat(messages):
+    """
+    Send the full message history (including the real system prompt already in
+    messages[0]) to llama.cpp and return the reply string.
+    Non-streaming so we can validate the complete reply before TTS.
+    """
     payload = {
-        "model": OLLAMA_MODEL,
-        "messages": messages,
-        "stream": True,
-        "options": {
-            "num_predict": OLLAMA_NUM_PREDICT,
-            "temperature": OLLAMA_TEMPERATURE,
-            "num_ctx": OLLAMA_NUM_CTX,
-        },
+        "model": "gemma-3-4b-it-q4_k_m",
+        "messages": messages,       # real system prompt + full conversation history
+        "temperature": LLAMA_TEMPERATURE,
+        "max_tokens": LLAMA_NUM_PREDICT,
+        "stream": False,
     }
-    print(f"[LLM] Sending request to Ollama ({OLLAMA_MODEL})...")
-    with requests.post(f"{OLLAMA_URL}/api/chat", json=payload, stream=True) as r:
-        r.raise_for_status()
-        print("[LLM] Stream started, receiving tokens...")
-        for line in r.iter_lines():
-            if line:
-                data = json.loads(line)
-                yield data.get("message", {}).get("content", "")
+
+    print("[LLM] Sending request to llama.cpp server...")
+    r = requests.post(
+        "http://localhost:8080/v1/chat/completions",
+        json=payload,
+    )
+    r.raise_for_status()
+    reply = r.json()["choices"][0]["message"]["content"]
+    print(f"[LLM] Raw response: {reply!r}")
+    return reply
 
 # =========================
 # AUDIO TRACKER
@@ -178,10 +192,10 @@ class TTSWorker(threading.Thread):
         if not text:
             return
 
-        text = russify_text(text)
-
+        # Do NOT transliterate — if the LLM hallucinated English, speaking
+        # Cyrillic-ised noise is worse than silence. Fail fast instead.
         if not self._has_cyrillic(text):
-            print(f"[TTS] Skipping non-Russian text: {text!r}")
+            print(f"[TTS] Skipping non-Russian text (fail-fast): {text!r}")
             return
 
         try:
@@ -281,6 +295,7 @@ class WhisperSTT:
 
             text = " ".join(seg.text.strip() for seg in segments).strip()
             print(f"[Whisper] detected_language={info.language} prob={info.language_probability:.3f}")
+            print(f"[Whisper] detected text={text}")
             return text
         except Exception as e:
             print(f"[Whisper ERROR] {e}")
@@ -383,7 +398,7 @@ class VoiceAssistant:
         self.tts.start()
         print("[Init] TTS worker started.")
 
-        self.sample_rate = 32000
+        self.sample_rate = 16000
         self.frame_samples = int(self.sample_rate * FRAME_MS / 1000)
         self.frame_bytes = self.frame_samples * 2
         print(f"[Init] Mic sample rate: {self.sample_rate} Hz")
@@ -498,43 +513,29 @@ class VoiceAssistant:
         return text
 
     def _respond_with_llm(self, user_text: str):
+        # Append user turn BEFORE calling the model so full history is sent.
         self.messages.append({"role": "user", "content": user_text})
         self._trim_history()
         print(f"[USER] {user_text}")
 
-        full_response = ""
-        current_sentence = ""
-        sentence_enders = {".", "?", "!", "\n"}
-        chunks_received = 0
+        FALLBACK = "Я не совсем понял. Повтори, пожалуйста."
 
         try:
-            for chunk in ollama_chat_stream(self.messages):
-                full_response += chunk
-                current_sentence += chunk
-                chunks_received += 1
+            reply = llama_chat(self.messages).strip()
 
-                if any(ender in chunk for ender in sentence_enders):
-                    clean = re.sub(r'[*_~`]', '', current_sentence.strip())
-                    if clean:
-                        print(f"[LLM -> TTS] {clean!r}")
-                        self.tts.say(clean)
-                    current_sentence = ""
-
-            clean = re.sub(r'[*_~`]', '', current_sentence.strip())
-            if clean:
-                print(f"[LLM -> TTS] (remainder) {clean!r}")
-                self.tts.say(clean)
-
-            print(f"[LLM] Stream finished. Chunks received: {chunks_received}")
+            # Validate: must be real Russian — Cyrillic only, no Latin letters.
+            if not looks_like_russian(reply):
+                print(f"[LLM] Reply failed Russian check — using fallback.")
+                reply = FALLBACK
 
         except Exception as e:
             print(f"[LLM ERROR] {e}")
             traceback.print_exc()
-            self.tts.say("Извини, у меня возникла проблема.")
+            reply = FALLBACK
 
-        print(f"[ASSISTANT] {full_response.strip()}")
-        self.messages.append({"role": "assistant", "content": full_response.strip()})
+        self.messages.append({"role": "assistant", "content": reply})
         self._trim_history()
+        self.tts.say(reply)
         self.mic_gate_until = time.time() + 0.5
 
     def run_forever(self):
