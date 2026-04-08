@@ -46,7 +46,7 @@ MEMORY_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'mem
 # =========================
 # CONFIGURATION
 # =========================
-MIC_DEVICE = 25  # 'default' system input (device 24 'demixer' is output-only)
+MIC_DEVICE = 26  # default system input
 
 WAKE_WORDS = [
     "hey box",
@@ -364,11 +364,11 @@ def retrieve_relevant_context(user_input: str, recall_mem, archival_mem) -> str:
         if hits:
             parts.append("[RECENT CONTEXT]")
             for h in hits:
-                parts.append(f"  {h['role']}: {h['content'][:100]}")
+                parts.append(f"  {h['role']}: {h['content'][:60]}")
         if facts:
             parts.append("[KNOWN FACTS]")
             for f in facts:
-                parts.append(f"  - {f['content'][:100]}")
+                parts.append(f"  - {f['content'][:60]}")
         return "\n".join(parts)
     except Exception as e:
         print(f"[Memory] RAG error: {e}")
@@ -849,15 +849,14 @@ class VoiceAssistant:
                 if lines:
                     base += "\n\n[LEARNED WORDS]\n" + ", ".join(lines[-20:])
 
-        # Personality traits from PersonalityEngine
-        if self.personality:
-            base += "\n\n" + self.personality.get_system_prompt_addition()
-
-        # Time-since-last-interaction hint from ContextManager (cross-session)
-        if self.ctx_mgr:
-            ctx_str = self.ctx_mgr.get_context_string()
-            if ctx_str.strip():
-                base += "\n" + ctx_str
+        # NOTE: PersonalityEngine and ContextManager are intentionally excluded
+        # from the system prompt. Both add tokens (which the thinking model
+        # Gemma 4 E2B must process before generating any content), while
+        # providing minimal practical value for a voice tutor:
+        #   - Personality percentages are decorative and add ~15 tokens per turn.
+        #   - "We last spoke X minutes ago" changes every minute, increases prompt
+        #     length, and busts the KV-cache prefix whenever the system prompt is
+        #     rebuilt. The tutor persona is already fully defined above.
 
         return base
 
@@ -941,13 +940,14 @@ class VoiceAssistant:
             self.ctx_mgr.update_interaction(
                 InteractionContext(last_interaction=datetime.now())
             )
-        save_last_seen()
+        # save_last_seen() moved to async thread — no need to block the LLM call
 
         # ── Step 2: RAG — fast read-only SQLite text search ───────────────
         # Injected as a prefix on the user message so the system-prompt
         # KV-cache prefix is not affected.
+        # Skip entirely when recall is empty (new session) to avoid overhead.
         user_content = user_text
-        if self.recall_mem and self.archival_mem:
+        if self.recall_mem and self.archival_mem and self.recall_mem.get_count() > 0:
             rag = retrieve_relevant_context(user_text, self.recall_mem, self.archival_mem)
             if rag:
                 user_content = f"{rag}\n\n{user_text}"
@@ -1052,6 +1052,9 @@ class VoiceAssistant:
             # 3. Store turn in recall (defer_embedding=True → no blocking encode)
             self.recall_mem.insert("user",      user_text,      defer_embedding=True)
             self.recall_mem.insert("assistant", assistant_text, defer_embedding=True)
+
+            # 3b. Persist last-seen timestamp (async — no need to block LLM turns)
+            save_last_seen()
 
             # 4. Compress old recall into archival when over limit
             if self.recall_mem.get_count() > RECALL_MEMORY_LIMIT and self.archival_mem:
