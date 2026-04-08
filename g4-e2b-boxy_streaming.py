@@ -45,7 +45,7 @@ SLEEP_PHRASES = [
 
 LLAMA_URL = "http://localhost:8080/v1/chat/completions"
 LLAMA_MODEL = "gemma-4-e2b-it-q4_k_m"
-LLAMA_NUM_PREDICT = 80
+LLAMA_NUM_PREDICT = 512
 LLAMA_TEMPERATURE = 0.5
 LLAMA_TIMEOUT_SEC = 90
 
