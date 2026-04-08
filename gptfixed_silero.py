@@ -81,21 +81,9 @@ def russify_text(text: str) -> str:
 # OLLAMA LOGIC (STREAMING)
 # =========================
 def llama_chat_stream(messages):
-    # Fix
-    messages = [
-        {
-            "role": "system",
-            "content": (
-                "You are a children's game assistant. "
-                "Give hints only. NEVER reveal the exact answer. "
-                "Speak simply and clearly."
-            ),
-        }
-    ] + messages
-
     payload = {
-        "model": "gemma-4-e4b-it-q4_k_m",
-        "messages": messages,
+        "model": "gemma-3-4b-it-q4_k_m",
+        "messages": messages,       # real system prompt + full conversation history
         "temperature": LLAMA_TEMPERATURE,
         "max_tokens": LLAMA_NUM_PREDICT,
         "stream": True,
@@ -209,10 +197,10 @@ class TTSWorker(threading.Thread):
         if not text:
             return
 
-        text = russify_text(text)
-
+        # Do NOT transliterate — if the LLM hallucinated English, speaking
+        # Cyrillic-ised noise is worse than silence. Fail fast instead.
         if not self._has_cyrillic(text):
-            print(f"[TTS] Skipping non-Russian text: {text!r}")
+            print(f"[TTS] Skipping non-Russian text (fail-fast): {text!r}")
             return
 
         try:
@@ -530,7 +518,7 @@ class VoiceAssistant:
         return text
 
     def _respond_with_llm(self, user_text: str):
-        messages = [{"role": "user", "content": user_text}]
+        self.messages.append({"role": "user", "content": user_text})
         self._trim_history()
         print(f"[USER] {user_text}")
 

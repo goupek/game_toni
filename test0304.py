@@ -81,20 +81,8 @@ def russify_text(text: str) -> str:
 # OLLAMA LOGIC (STREAMING)
 # =========================
 def llama_chat_stream(messages):
-    # Fix
-    messages = [
-        {
-            "role": "system",
-            "content": (
-                "You are a children's game assistant. "
-                "Give hints only. NEVER reveal the exact answer. "
-                "Speak simply and clearly."
-            ),
-        }
-    ] + messages
-
     payload = {
-        "model": "gemma-4-e4b-it-q4_k_m",
+        "model": "7B",
         "messages": messages,
         "temperature": LLAMA_TEMPERATURE,
         "max_tokens": LLAMA_NUM_PREDICT,
@@ -530,7 +518,7 @@ class VoiceAssistant:
         return text
 
     def _respond_with_llm(self, user_text: str):
-        messages = [{"role": "user", "content": user_text}]
+        self.messages.append({"role": "user", "content": user_text})
         self._trim_history()
         print(f"[USER] {user_text}")
 
@@ -540,7 +528,7 @@ class VoiceAssistant:
         chunks_received = 0
 
         try:
-            for chunk in llama_chat_stream(messages):
+            for chunk in llama_chat_stream(self.messages):
                 full_response += chunk
                 current_sentence += chunk
                 chunks_received += 1

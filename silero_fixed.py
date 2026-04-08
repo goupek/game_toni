@@ -78,57 +78,59 @@ def russify_text(text: str) -> str:
     return re.sub(r'[a-zA-Z]+', replace_english, text)
 
 # =========================
-# OLLAMA LOGIC (STREAMING)
+# LLM LOGIC
 # =========================
-def llama_chat_stream(messages):
-    # Fix
-    messages = [
-        {
-            "role": "system",
-            "content": (
-                "You are a children's game assistant. "
-                "Give hints only. NEVER reveal the exact answer. "
-                "Speak simply and clearly."
-            ),
-        }
-    ] + messages
+def looks_like_russian(text: str) -> bool:
+    """Return True only if text is non-empty, has Cyrillic chars, and no Latin letters."""
+    text = re.sub(r'[*_~`]', '', text).strip()
+    return (
+        bool(text)
+        and not re.search(r'[A-Za-z]', text)
+        and bool(re.search(r'[А-Яа-яЁё]', text))
+    )
 
+def llama_chat(messages):
+    """
+    Send the full message history (including the real system prompt) to
+    llama.cpp and return a validated dict with keys: reply_ru, status, confidence.
+    Uses JSON-schema constrained output so hallucinated English is caught
+    before it ever reaches TTS.
+    """
     payload = {
-        "model": "gemma-4-e4b-it-q4_k_m",
-        "messages": messages,
-        "temperature": LLAMA_TEMPERATURE,
-        "max_tokens": LLAMA_NUM_PREDICT,
-        "stream": True,
+        "model": "gemma-3-4b-it-q4_k_m",
+        "messages": messages,          # real system prompt + full history
+        "temperature": 0.2,            # low temperature = less drift / hallucination
+        "max_tokens": 120,
+        "stream": False,               # validate the whole reply before speaking
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "tutor_reply",
+                "strict": True,
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "reply_ru":   {"type": "string"},
+                        "status":     {"type": "string",
+                                       "enum": ["ok", "clarify", "uncertain"]},
+                        "confidence": {"type": "number"},
+                    },
+                    "required": ["reply_ru", "status", "confidence"],
+                    "additionalProperties": False,
+                },
+            },
+        },
     }
 
     print("[LLM] Sending request to llama.cpp server...")
-
-    with requests.post(
+    r = requests.post(
         "http://localhost:8080/v1/chat/completions",
         json=payload,
-        stream=True,
-    ) as r:
-        r.raise_for_status()
-        print("[LLM] Stream started, receiving tokens...")
-
-        for line in r.iter_lines():
-            if not line:
-                continue
-
-            # llama.cpp uses SSE format: "data: {...}"
-            if line.startswith(b"data: "):
-                line = line[len(b"data: "):]
-
-            if line == b"[DONE]":
-                break
-
-            data = json.loads(line)
-
-            delta = data["choices"][0]["delta"]
-            content = delta.get("content", "")
-
-            if content:
-                yield content
+    )
+    r.raise_for_status()
+    raw = r.json()["choices"][0]["message"]["content"]
+    print(f"[LLM] Raw response: {raw!r}")
+    return json.loads(raw)
 
 # =========================
 # AUDIO TRACKER
@@ -209,10 +211,10 @@ class TTSWorker(threading.Thread):
         if not text:
             return
 
-        text = russify_text(text)
-
+        # Do NOT transliterate — if the LLM hallucinated English, speaking
+        # Cyrillic-ised noise is worse than silence. Fail fast instead.
         if not self._has_cyrillic(text):
-            print(f"[TTS] Skipping non-Russian text: {text!r}")
+            print(f"[TTS] Skipping non-Russian text (fail-fast): {text!r}")
             return
 
         try:
@@ -530,43 +532,39 @@ class VoiceAssistant:
         return text
 
     def _respond_with_llm(self, user_text: str):
-        messages = [{"role": "user", "content": user_text}]
+        # Append the user turn BEFORE calling the model so the full history is sent.
+        self.messages.append({"role": "user", "content": user_text})
         self._trim_history()
         print(f"[USER] {user_text}")
 
-        full_response = ""
-        current_sentence = ""
-        sentence_enders = {".", "?", "!", "\n"}
-        chunks_received = 0
+        FALLBACK = "Я не совсем понял. Повтори, пожалуйста."
 
         try:
-            for chunk in llama_chat_stream(messages):
-                full_response += chunk
-                current_sentence += chunk
-                chunks_received += 1
+            obj = llama_chat(self.messages)
+            reply = obj.get("reply_ru", "").strip()
+            confidence = obj.get("confidence", 1.0)
+            status = obj.get("status", "ok")
 
-                if any(ender in chunk for ender in sentence_enders):
-                    clean = re.sub(r'[*_~`]', '', current_sentence.strip())
-                    if clean:
-                        print(f"[LLM -> TTS] {clean!r}")
-                        self.tts.say(clean)
-                    current_sentence = ""
+            print(f"[LLM] status={status} confidence={confidence:.2f} reply={reply!r}")
 
-            clean = re.sub(r'[*_~`]', '', current_sentence.strip())
-            if clean:
-                print(f"[LLM -> TTS] (remainder) {clean!r}")
-                self.tts.say(clean)
+            # Validate: must look like real Russian (Cyrillic only, no Latin).
+            if not looks_like_russian(reply):
+                print(f"[LLM] Reply failed Russian check — using fallback.")
+                reply = FALLBACK
 
-            print(f"[LLM] Stream finished. Chunks received: {chunks_received}")
+            # Also fall back when the model itself signals it is uncertain.
+            if status == "uncertain" or confidence < 0.4:
+                print(f"[LLM] Low-confidence reply — using fallback.")
+                reply = FALLBACK
 
         except Exception as e:
             print(f"[LLM ERROR] {e}")
             traceback.print_exc()
-            self.tts.say("Извини, у меня возникла проблема.")
+            reply = FALLBACK
 
-        print(f"[ASSISTANT] {full_response.strip()}")
-        self.messages.append({"role": "assistant", "content": full_response.strip()})
+        self.messages.append({"role": "assistant", "content": reply})
         self._trim_history()
+        self.tts.say(reply)
         self.mic_gate_until = time.time() + 0.5
 
     def run_forever(self):
