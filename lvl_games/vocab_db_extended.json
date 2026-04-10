@@ -1,0 +1,536 @@
+{
+  "meta": {
+    "language": "ru",
+    "level": "A1–A2",
+    "audience": "kids / beginners",
+    "schema": {
+      "word": {
+        "ru":         "string  — base/masculine/nominative singular form",
+        "en":         "string",
+        "pos":        "string  — noun | adj | verb | num | pronoun | phrase | …",
+        "level":      "A1 | A2",
+        "gender":     "(nouns) m | f | n | pl | indecl",
+        "forms":      "(adjectives / numbers) { m, f, n, pl } or { m, f, n } or { all }",
+        "noun_forms": "(key nouns used by game2) { sg, pl, gen_pl }"
+      }
+    },
+    "notes": [
+      "gender  — grammatical gender of nouns; pl = pluralia tantum; indecl = indeclinable",
+      "forms   — declined forms used by game2 adjective/number questions",
+      "noun_forms — sg/pl/gen_pl needed for game2 question text"
+    ]
+  },
+  "topics": [
+    {
+      "id": "family",
+      "name_ru": "Семья",
+      "words": [
+        { "ru": "мама",      "en": "mom",           "pos": "noun",    "level": "A1", "gender": "f" },
+        { "ru": "папа",      "en": "dad",           "pos": "noun",    "level": "A1", "gender": "m" },
+        { "ru": "бабушка",   "en": "grandma",       "pos": "noun",    "level": "A1", "gender": "f" },
+        { "ru": "дедушка",   "en": "grandpa",       "pos": "noun",    "level": "A1", "gender": "m" },
+        { "ru": "брат",      "en": "brother",       "pos": "noun",    "level": "A1", "gender": "m" },
+        { "ru": "сестра",    "en": "sister",        "pos": "noun",    "level": "A1", "gender": "f" },
+        { "ru": "я",         "en": "I",             "pos": "pronoun", "level": "A1" },
+        { "ru": "ты",        "en": "you (singular)","pos": "pronoun", "level": "A1" },
+        { "ru": "он",        "en": "he",            "pos": "pronoun", "level": "A1", "gender": "m" },
+        { "ru": "она",       "en": "she",           "pos": "pronoun", "level": "A1", "gender": "f" },
+        { "ru": "мы",        "en": "we",            "pos": "pronoun", "level": "A1" },
+        { "ru": "они",       "en": "they",          "pos": "pronoun", "level": "A1" },
+
+        { "ru": "семья",     "en": "family",        "pos": "noun",    "level": "A2", "gender": "f" },
+        { "ru": "родители",  "en": "parents",       "pos": "noun",    "level": "A2", "gender": "pl" },
+        { "ru": "ребёнок",   "en": "child",         "pos": "noun",    "level": "A2", "gender": "m" },
+        { "ru": "сын",       "en": "son",           "pos": "noun",    "level": "A2", "gender": "m" },
+        { "ru": "дочь",      "en": "daughter",      "pos": "noun",    "level": "A2", "gender": "f" },
+        { "ru": "муж",       "en": "husband",       "pos": "noun",    "level": "A2", "gender": "m" },
+        { "ru": "жена",      "en": "wife",          "pos": "noun",    "level": "A2", "gender": "f" },
+        { "ru": "тётя",      "en": "aunt",          "pos": "noun",    "level": "A2", "gender": "f" },
+        { "ru": "дядя",      "en": "uncle",         "pos": "noun",    "level": "A2", "gender": "m" }
+      ]
+    },
+    {
+      "id": "greetings",
+      "name_ru": "Приветствия и вежливость",
+      "words": [
+        { "ru": "привет",                   "en": "hi",                       "pos": "interjection", "level": "A1" },
+        { "ru": "пока",                     "en": "bye",                      "pos": "interjection", "level": "A1" },
+        { "ru": "здравствуй",               "en": "hello",                    "pos": "interjection", "level": "A1" },
+        { "ru": "спасибо",                  "en": "thank you",                "pos": "interjection", "level": "A1" },
+        { "ru": "пожалуйста",               "en": "please / you're welcome",  "pos": "interjection", "level": "A1" },
+        { "ru": "да",                       "en": "yes",                      "pos": "particle",     "level": "A1" },
+        { "ru": "нет",                      "en": "no",                       "pos": "particle",     "level": "A1" },
+        { "ru": "можно",                    "en": "may I / allowed",          "pos": "modal",        "level": "A1" },
+        { "ru": "нельзя",                   "en": "not allowed",              "pos": "modal",        "level": "A1" },
+
+        { "ru": "до свидания",              "en": "goodbye",                  "pos": "phrase",       "level": "A2" },
+        { "ru": "извините",                 "en": "excuse me / sorry",        "pos": "interjection", "level": "A2" },
+        { "ru": "простите",                 "en": "forgive me / sorry",       "pos": "interjection", "level": "A2" },
+        { "ru": "как дела?",                "en": "how are you?",             "pos": "phrase",       "level": "A2" },
+        { "ru": "доброе утро",              "en": "good morning",             "pos": "phrase",       "level": "A2" },
+        { "ru": "добрый день",              "en": "good afternoon",           "pos": "phrase",       "level": "A2" },
+        { "ru": "добрый вечер",             "en": "good evening",             "pos": "phrase",       "level": "A2" },
+        { "ru": "приятно познакомиться",    "en": "nice to meet you",         "pos": "phrase",       "level": "A2" }
+      ]
+    },
+    {
+      "id": "colors",
+      "name_ru": "Цвета",
+      "words": [
+        {
+          "ru": "красный", "en": "red",   "pos": "adj", "level": "A1",
+          "forms": { "m": "красный",     "f": "красная",     "n": "красное",     "pl": "красные" }
+        },
+        {
+          "ru": "синий",   "en": "blue",  "pos": "adj", "level": "A1",
+          "forms": { "m": "синий",       "f": "синяя",       "n": "синее",       "pl": "синие" }
+        },
+        {
+          "ru": "зелёный", "en": "green", "pos": "adj", "level": "A1",
+          "forms": { "m": "зелёный",     "f": "зелёная",     "n": "зелёное",     "pl": "зелёные" }
+        },
+        {
+          "ru": "жёлтый",  "en": "yellow","pos": "adj", "level": "A1",
+          "forms": { "m": "жёлтый",      "f": "жёлтая",      "n": "жёлтое",      "pl": "жёлтые" }
+        },
+        {
+          "ru": "белый",   "en": "white", "pos": "adj", "level": "A1",
+          "forms": { "m": "белый",       "f": "белая",       "n": "белое",       "pl": "белые" }
+        },
+        {
+          "ru": "чёрный",  "en": "black", "pos": "adj", "level": "A1",
+          "forms": { "m": "чёрный",      "f": "чёрная",      "n": "чёрное",      "pl": "чёрные" }
+        },
+        {
+          "ru": "розовый", "en": "pink",  "pos": "adj", "level": "A1",
+          "forms": { "m": "розовый",     "f": "розовая",     "n": "розовое",     "pl": "розовые" }
+        },
+        {
+          "ru": "оранжевый","en": "orange","pos": "adj", "level": "A1",
+          "forms": { "m": "оранжевый",   "f": "оранжевая",   "n": "оранжевое",   "pl": "оранжевые" }
+        },
+        {
+          "ru": "серый",   "en": "gray",  "pos": "adj", "level": "A1",
+          "forms": { "m": "серый",       "f": "серая",       "n": "серое",       "pl": "серые" }
+        },
+        {
+          "ru": "коричневый","en": "brown","pos": "adj", "level": "A1",
+          "forms": { "m": "коричневый",  "f": "коричневая",  "n": "коричневое",  "pl": "коричневые" }
+        },
+
+        {
+          "ru": "голубой",     "en": "light blue","pos": "adj", "level": "A2",
+          "forms": { "m": "голубой",     "f": "голубая",     "n": "голубое",     "pl": "голубые" }
+        },
+        {
+          "ru": "фиолетовый",  "en": "purple",    "pos": "adj", "level": "A2",
+          "forms": { "m": "фиолетовый",  "f": "фиолетовая",  "n": "фиолетовое",  "pl": "фиолетовые" }
+        },
+        {
+          "ru": "бежевый",     "en": "beige",     "pos": "adj", "level": "A2",
+          "forms": { "m": "бежевый",     "f": "бежевая",     "n": "бежевое",     "pl": "бежевые" }
+        }
+      ]
+    },
+    {
+      "id": "numbers",
+      "name_ru": "Числа",
+      "words": [
+        {
+          "ru": "один",   "en": "one",      "pos": "num", "level": "A1",
+          "forms": { "m": "один",  "f": "одна",  "n": "одно" }
+        },
+        {
+          "ru": "два",    "en": "two",      "pos": "num", "level": "A1",
+          "forms": { "m": "два",   "f": "две",   "n": "два" }
+        },
+        { "ru": "три",        "en": "three",    "pos": "num", "level": "A1", "forms": { "all": "три" } },
+        { "ru": "четыре",     "en": "four",     "pos": "num", "level": "A1", "forms": { "all": "четыре" } },
+        { "ru": "пять",       "en": "five",     "pos": "num", "level": "A1", "forms": { "all": "пять" } },
+        { "ru": "шесть",      "en": "six",      "pos": "num", "level": "A1", "forms": { "all": "шесть" } },
+        { "ru": "семь",       "en": "seven",    "pos": "num", "level": "A1", "forms": { "all": "семь" } },
+        { "ru": "восемь",     "en": "eight",    "pos": "num", "level": "A1", "forms": { "all": "восемь" } },
+        { "ru": "девять",     "en": "nine",     "pos": "num", "level": "A1", "forms": { "all": "девять" } },
+        { "ru": "десять",     "en": "ten",      "pos": "num", "level": "A1", "forms": { "all": "десять" } },
+
+        { "ru": "одиннадцать",  "en": "eleven",    "pos": "num", "level": "A2", "forms": { "all": "одиннадцать" } },
+        { "ru": "двенадцать",   "en": "twelve",    "pos": "num", "level": "A2", "forms": { "all": "двенадцать" } },
+        { "ru": "тринадцать",   "en": "thirteen",  "pos": "num", "level": "A2", "forms": { "all": "тринадцать" } },
+        { "ru": "четырнадцать", "en": "fourteen",  "pos": "num", "level": "A2", "forms": { "all": "четырнадцать" } },
+        { "ru": "пятнадцать",   "en": "fifteen",   "pos": "num", "level": "A2", "forms": { "all": "пятнадцать" } },
+        { "ru": "шестнадцать",  "en": "sixteen",   "pos": "num", "level": "A2", "forms": { "all": "шестнадцать" } },
+        { "ru": "семнадцать",   "en": "seventeen", "pos": "num", "level": "A2", "forms": { "all": "семнадцать" } },
+        { "ru": "восемнадцать", "en": "eighteen",  "pos": "num", "level": "A2", "forms": { "all": "восемнадцать" } },
+        { "ru": "девятнадцать", "en": "nineteen",  "pos": "num", "level": "A2", "forms": { "all": "девятнадцать" } },
+        { "ru": "двадцать",     "en": "twenty",    "pos": "num", "level": "A2", "forms": { "all": "двадцать" } }
+      ]
+    },
+    {
+      "id": "body",
+      "name_ru": "Тело",
+      "words": [
+        { "ru": "голова",  "en": "head",       "pos": "noun", "level": "A1", "gender": "f" },
+        { "ru": "волосы",  "en": "hair",       "pos": "noun", "level": "A1", "gender": "pl" },
+        { "ru": "лицо",    "en": "face",       "pos": "noun", "level": "A1", "gender": "n" },
+        { "ru": "глаза",   "en": "eyes",       "pos": "noun", "level": "A1", "gender": "pl" },
+        { "ru": "нос",     "en": "nose",       "pos": "noun", "level": "A1", "gender": "m" },
+        { "ru": "рот",     "en": "mouth",      "pos": "noun", "level": "A1", "gender": "m" },
+        { "ru": "зубы",    "en": "teeth",      "pos": "noun", "level": "A1", "gender": "pl" },
+        { "ru": "ухо",     "en": "ear",        "pos": "noun", "level": "A1", "gender": "n" },
+        { "ru": "рука",    "en": "hand/arm",   "pos": "noun", "level": "A1", "gender": "f" },
+        { "ru": "нога",    "en": "leg/foot",   "pos": "noun", "level": "A1", "gender": "f" },
+        { "ru": "палец",   "en": "finger/toe", "pos": "noun", "level": "A1", "gender": "m" },
+        { "ru": "живот",   "en": "belly",      "pos": "noun", "level": "A1", "gender": "m" },
+        { "ru": "спина",   "en": "back",       "pos": "noun", "level": "A1", "gender": "f" },
+
+        { "ru": "шея",    "en": "neck",             "pos": "noun", "level": "A2", "gender": "f" },
+        { "ru": "плечо",  "en": "shoulder",          "pos": "noun", "level": "A2", "gender": "n" },
+        { "ru": "колено", "en": "knee",              "pos": "noun", "level": "A2", "gender": "n" },
+        { "ru": "стопа",  "en": "foot (sole)",       "pos": "noun", "level": "A2", "gender": "f" },
+        { "ru": "сердце", "en": "heart",             "pos": "noun", "level": "A2", "gender": "n" }
+      ]
+    },
+    {
+      "id": "actions",
+      "name_ru": "Действия (простые глаголы)",
+      "words": [
+        { "ru": "идти",       "en": "to go (walk)",    "pos": "verb", "level": "A1" },
+        { "ru": "бежать",     "en": "to run",          "pos": "verb", "level": "A1" },
+        { "ru": "сидеть",     "en": "to sit",          "pos": "verb", "level": "A1" },
+        { "ru": "стоять",     "en": "to stand",        "pos": "verb", "level": "A1" },
+        { "ru": "спать",      "en": "to sleep",        "pos": "verb", "level": "A1" },
+        { "ru": "есть",       "en": "to eat",          "pos": "verb", "level": "A1" },
+        { "ru": "пить",       "en": "to drink",        "pos": "verb", "level": "A1" },
+        { "ru": "играть",     "en": "to play",         "pos": "verb", "level": "A1" },
+        { "ru": "читать",     "en": "to read",         "pos": "verb", "level": "A1" },
+        { "ru": "рисовать",   "en": "to draw",         "pos": "verb", "level": "A1" },
+        { "ru": "слушать",    "en": "to listen",       "pos": "verb", "level": "A1" },
+        { "ru": "смотреть",   "en": "to look/watch",   "pos": "verb", "level": "A1" },
+        { "ru": "мыть",       "en": "to wash",         "pos": "verb", "level": "A1" },
+        { "ru": "одеваться",  "en": "to get dressed",  "pos": "verb", "level": "A1" },
+        { "ru": "открыть",    "en": "to open",         "pos": "verb", "level": "A1" },
+        { "ru": "закрыть",    "en": "to close",        "pos": "verb", "level": "A1" },
+        { "ru": "дай",        "en": "give (me)",       "pos": "verb", "level": "A1" },
+        { "ru": "возьми",     "en": "take",            "pos": "verb", "level": "A1" },
+
+        { "ru": "говорить",   "en": "to speak",         "pos": "verb", "level": "A2" },
+        { "ru": "понимать",   "en": "to understand",    "pos": "verb", "level": "A2" },
+        { "ru": "спрашивать", "en": "to ask",           "pos": "verb", "level": "A2" },
+        { "ru": "отвечать",   "en": "to answer",        "pos": "verb", "level": "A2" },
+        { "ru": "учиться",    "en": "to study/learn",   "pos": "verb", "level": "A2" },
+        { "ru": "работать",   "en": "to work",          "pos": "verb", "level": "A2" },
+        { "ru": "помогать",   "en": "to help",          "pos": "verb", "level": "A2" },
+        { "ru": "готовить",   "en": "to cook/prepare",  "pos": "verb", "level": "A2" },
+        { "ru": "покупать",   "en": "to buy",           "pos": "verb", "level": "A2" },
+        { "ru": "ждать",      "en": "to wait",          "pos": "verb", "level": "A2" }
+      ]
+    },
+    {
+      "id": "food",
+      "name_ru": "Еда и напитки",
+      "words": [
+        { "ru": "вода",      "en": "water",          "pos": "noun", "level": "A1", "gender": "f" },
+        { "ru": "сок",       "en": "juice",          "pos": "noun", "level": "A1", "gender": "m" },
+        { "ru": "чай",       "en": "tea",            "pos": "noun", "level": "A1", "gender": "m" },
+        { "ru": "молоко",    "en": "milk",           "pos": "noun", "level": "A1", "gender": "n" },
+        { "ru": "хлеб",      "en": "bread",          "pos": "noun", "level": "A1", "gender": "m" },
+        { "ru": "сыр",       "en": "cheese",         "pos": "noun", "level": "A1", "gender": "m" },
+        { "ru": "каша",      "en": "porridge",       "pos": "noun", "level": "A1", "gender": "f" },
+        { "ru": "суп",       "en": "soup",           "pos": "noun", "level": "A1", "gender": "m" },
+        { "ru": "яблоко",    "en": "apple",          "pos": "noun", "level": "A1", "gender": "n" },
+        { "ru": "банан",     "en": "banana",         "pos": "noun", "level": "A1", "gender": "m" },
+        { "ru": "груша",     "en": "pear",           "pos": "noun", "level": "A1", "gender": "f" },
+        { "ru": "печенье",   "en": "cookie/biscuit", "pos": "noun", "level": "A1", "gender": "n" },
+        { "ru": "конфета",   "en": "candy",          "pos": "noun", "level": "A1", "gender": "f" },
+        { "ru": "йогурт",    "en": "yogurt",         "pos": "noun", "level": "A1", "gender": "m" },
+        { "ru": "яйцо",      "en": "egg",            "pos": "noun", "level": "A1", "gender": "n" },
+
+        { "ru": "кофе",      "en": "coffee",         "pos": "noun", "level": "A2", "gender": "indecl" },
+        { "ru": "мясо",      "en": "meat",           "pos": "noun", "level": "A2", "gender": "n" },
+        { "ru": "курица",    "en": "chicken",        "pos": "noun", "level": "A2", "gender": "f" },
+        { "ru": "овощи",     "en": "vegetables",     "pos": "noun", "level": "A2", "gender": "pl" },
+        { "ru": "фрукты",    "en": "fruits",         "pos": "noun", "level": "A2", "gender": "pl" },
+        { "ru": "картофель", "en": "potato",         "pos": "noun", "level": "A2", "gender": "m" },
+        { "ru": "рис",       "en": "rice",           "pos": "noun", "level": "A2", "gender": "m" },
+        { "ru": "макароны",  "en": "pasta",          "pos": "noun", "level": "A2", "gender": "pl" },
+        { "ru": "салат",     "en": "salad",          "pos": "noun", "level": "A2", "gender": "m" },
+        { "ru": "мороженое", "en": "ice cream",      "pos": "noun", "level": "A2", "gender": "n" }
+      ]
+    },
+    {
+      "id": "home",
+      "name_ru": "Дом",
+      "words": [
+        { "ru": "дом",         "en": "home/house",       "pos": "noun", "level": "A1", "gender": "m" },
+        { "ru": "комната",     "en": "room",             "pos": "noun", "level": "A1", "gender": "f" },
+        { "ru": "кухня",       "en": "kitchen",          "pos": "noun", "level": "A1", "gender": "f" },
+        { "ru": "ванна",       "en": "bathroom/bath",    "pos": "noun", "level": "A1", "gender": "f" },
+        { "ru": "кровать",     "en": "bed",              "pos": "noun", "level": "A1", "gender": "f" },
+        { "ru": "стол",        "en": "table",            "pos": "noun", "level": "A1", "gender": "m" },
+        { "ru": "стул",        "en": "chair",            "pos": "noun", "level": "A1", "gender": "m" },
+        { "ru": "диван",       "en": "sofa",             "pos": "noun", "level": "A1", "gender": "m" },
+        { "ru": "шкаф",        "en": "wardrobe/cabinet", "pos": "noun", "level": "A1", "gender": "m" },
+        { "ru": "дверь",       "en": "door",             "pos": "noun", "level": "A1", "gender": "f" },
+        { "ru": "окно",        "en": "window",           "pos": "noun", "level": "A1", "gender": "n" },
+        { "ru": "свет",        "en": "light",            "pos": "noun", "level": "A1", "gender": "m" },
+        { "ru": "лампа",       "en": "lamp",             "pos": "noun", "level": "A1", "gender": "f" },
+
+        { "ru": "квартира",    "en": "apartment",        "pos": "noun", "level": "A2", "gender": "f" },
+        { "ru": "холодильник", "en": "fridge",           "pos": "noun", "level": "A2", "gender": "m" },
+        { "ru": "плита",       "en": "stove",            "pos": "noun", "level": "A2", "gender": "f" },
+        { "ru": "душ",         "en": "shower",           "pos": "noun", "level": "A2", "gender": "m" },
+        { "ru": "туалет",      "en": "toilet",           "pos": "noun", "level": "A2", "gender": "m" },
+        { "ru": "зеркало",     "en": "mirror",           "pos": "noun", "level": "A2", "gender": "n" },
+        { "ru": "полотенце",   "en": "towel",            "pos": "noun", "level": "A2", "gender": "n" },
+        { "ru": "ковёр",       "en": "carpet",           "pos": "noun", "level": "A2", "gender": "m" },
+        { "ru": "балкон",      "en": "balcony",          "pos": "noun", "level": "A2", "gender": "m" }
+      ]
+    },
+    {
+      "id": "toys",
+      "name_ru": "Игрушки",
+      "words": [
+        { "ru": "игрушка",   "en": "toy",            "pos": "noun", "level": "A1", "gender": "f" },
+        {
+          "ru": "мяч",       "en": "ball",           "pos": "noun", "level": "A1", "gender": "m",
+          "noun_forms": { "sg": "мяч", "pl": "мячи", "gen_pl": "мячей" }
+        },
+        { "ru": "кукла",     "en": "doll",           "pos": "noun", "level": "A1", "gender": "f" },
+        { "ru": "машинка",   "en": "toy car",        "pos": "noun", "level": "A1", "gender": "f" },
+        { "ru": "мишка",     "en": "teddy bear",     "pos": "noun", "level": "A1", "gender": "m" },
+        { "ru": "пирамидка", "en": "stacking rings", "pos": "noun", "level": "A1", "gender": "f" },
+        { "ru": "кубик",     "en": "block/cube",     "pos": "noun", "level": "A1", "gender": "m" },
+        { "ru": "пазл",      "en": "puzzle",         "pos": "noun", "level": "A1", "gender": "m" },
+        { "ru": "книга",     "en": "book",           "pos": "noun", "level": "A1", "gender": "f" },
+        { "ru": "рисунок",   "en": "drawing",        "pos": "noun", "level": "A1", "gender": "m" },
+
+        { "ru": "конструктор",    "en": "construction set", "pos": "noun", "level": "A2", "gender": "m" },
+        { "ru": "робот",          "en": "robot",            "pos": "noun", "level": "A2", "gender": "m" },
+        { "ru": "самокат",        "en": "scooter",          "pos": "noun", "level": "A2", "gender": "m" },
+        { "ru": "пластилин",      "en": "modeling clay",    "pos": "noun", "level": "A2", "gender": "m" },
+        { "ru": "настольная игра","en": "board game",       "pos": "phrase","level": "A2", "gender": "f" }
+      ]
+    },
+    {
+      "id": "clothes",
+      "name_ru": "Одежда",
+      "words": [
+        { "ru": "шапка",      "en": "hat",            "pos": "noun", "level": "A1", "gender": "f" },
+        { "ru": "куртка",     "en": "jacket",         "pos": "noun", "level": "A1", "gender": "f" },
+        { "ru": "пальто",     "en": "coat",           "pos": "noun", "level": "A1", "gender": "n" },
+        { "ru": "кофта",      "en": "sweater",        "pos": "noun", "level": "A1", "gender": "f" },
+        { "ru": "футболка",   "en": "T-shirt",        "pos": "noun", "level": "A1", "gender": "f" },
+        { "ru": "штаны",      "en": "pants",          "pos": "noun", "level": "A1", "gender": "pl" },
+        { "ru": "платье",     "en": "dress",          "pos": "noun", "level": "A1", "gender": "n" },
+        { "ru": "носок",      "en": "sock",           "pos": "noun", "level": "A1", "gender": "m" },
+        { "ru": "обувь",      "en": "shoes/footwear", "pos": "noun", "level": "A1", "gender": "f" },
+        { "ru": "ботинок",    "en": "boot/shoe",      "pos": "noun", "level": "A1", "gender": "m" },
+
+        { "ru": "джинсы",    "en": "jeans",     "pos": "noun", "level": "A2", "gender": "pl" },
+        { "ru": "юбка",      "en": "skirt",     "pos": "noun", "level": "A2", "gender": "f" },
+        { "ru": "шарф",      "en": "scarf",     "pos": "noun", "level": "A2", "gender": "m" },
+        { "ru": "перчатки",  "en": "gloves",    "pos": "noun", "level": "A2", "gender": "pl" },
+        { "ru": "кроссовки", "en": "sneakers",  "pos": "noun", "level": "A2", "gender": "pl" },
+        { "ru": "пижама",    "en": "pajamas",   "pos": "noun", "level": "A2", "gender": "f" }
+      ]
+    },
+    {
+      "id": "animals",
+      "name_ru": "Животные",
+      "words": [
+        { "ru": "кот",     "en": "cat (male)", "pos": "noun", "level": "A1", "gender": "m" },
+        {
+          "ru": "кошка",   "en": "cat",        "pos": "noun", "level": "A1", "gender": "f",
+          "noun_forms": { "sg": "кошка", "pl": "кошки", "gen_pl": "кошек" }
+        },
+        {
+          "ru": "собака",  "en": "dog",        "pos": "noun", "level": "A1", "gender": "f",
+          "noun_forms": { "sg": "собака", "pl": "собаки", "gen_pl": "собак" }
+        },
+        { "ru": "птица",   "en": "bird",       "pos": "noun", "level": "A1", "gender": "f" },
+        { "ru": "рыба",    "en": "fish",       "pos": "noun", "level": "A1", "gender": "f" },
+        { "ru": "лошадь",  "en": "horse",      "pos": "noun", "level": "A1", "gender": "f" },
+        { "ru": "корова",  "en": "cow",        "pos": "noun", "level": "A1", "gender": "f" },
+        { "ru": "овца",    "en": "sheep",      "pos": "noun", "level": "A1", "gender": "f" },
+        { "ru": "коза",    "en": "goat",       "pos": "noun", "level": "A1", "gender": "f" },
+        { "ru": "кролик",  "en": "rabbit",     "pos": "noun", "level": "A1", "gender": "m" },
+        { "ru": "медведь", "en": "bear",       "pos": "noun", "level": "A1", "gender": "m" },
+        { "ru": "лиса",    "en": "fox",        "pos": "noun", "level": "A1", "gender": "f" },
+
+        { "ru": "утка",    "en": "duck",       "pos": "noun", "level": "A2", "gender": "f" },
+        { "ru": "курица",  "en": "chicken",    "pos": "noun", "level": "A2", "gender": "f" },
+        { "ru": "свинья",  "en": "pig",        "pos": "noun", "level": "A2", "gender": "f" },
+        { "ru": "волк",    "en": "wolf",       "pos": "noun", "level": "A2", "gender": "m" },
+        { "ru": "тигр",    "en": "tiger",      "pos": "noun", "level": "A2", "gender": "m" }
+      ]
+    },
+    {
+      "id": "nature",
+      "name_ru": "Природа и погода",
+      "words": [
+        { "ru": "солнце",  "en": "sun",    "pos": "noun", "level": "A1", "gender": "n" },
+        { "ru": "луна",    "en": "moon",   "pos": "noun", "level": "A1", "gender": "f" },
+        { "ru": "звезда",  "en": "star",   "pos": "noun", "level": "A1", "gender": "f" },
+        { "ru": "небо",    "en": "sky",    "pos": "noun", "level": "A1", "gender": "n" },
+        { "ru": "облако",  "en": "cloud",  "pos": "noun", "level": "A1", "gender": "n" },
+        { "ru": "дождь",   "en": "rain",   "pos": "noun", "level": "A1", "gender": "m" },
+        { "ru": "снег",    "en": "snow",   "pos": "noun", "level": "A1", "gender": "m" },
+        { "ru": "ветер",   "en": "wind",   "pos": "noun", "level": "A1", "gender": "m" },
+        { "ru": "вода",    "en": "water",  "pos": "noun", "level": "A1", "gender": "f" },
+        { "ru": "дерево",  "en": "tree",   "pos": "noun", "level": "A1", "gender": "n" },
+        { "ru": "цветок",  "en": "flower", "pos": "noun", "level": "A1", "gender": "m" },
+
+        { "ru": "лес",   "en": "forest",   "pos": "noun", "level": "A2", "gender": "m" },
+        { "ru": "река",  "en": "river",    "pos": "noun", "level": "A2", "gender": "f" },
+        { "ru": "гора",  "en": "mountain", "pos": "noun", "level": "A2", "gender": "f" },
+        { "ru": "озеро", "en": "lake",     "pos": "noun", "level": "A2", "gender": "n" },
+        { "ru": "море",  "en": "sea",      "pos": "noun", "level": "A2", "gender": "n" },
+        { "ru": "трава", "en": "grass",    "pos": "noun", "level": "A2", "gender": "f" },
+        { "ru": "лист",  "en": "leaf",     "pos": "noun", "level": "A2", "gender": "m" }
+      ]
+    },
+    {
+      "id": "transport",
+      "name_ru": "Транспорт",
+      "words": [
+        {
+          "ru": "машина",    "en": "car",          "pos": "noun", "level": "A1", "gender": "f",
+          "noun_forms": { "sg": "машина", "pl": "машины", "gen_pl": "машин" }
+        },
+        { "ru": "автобус",   "en": "bus",          "pos": "noun", "level": "A1", "gender": "m" },
+        { "ru": "поезд",     "en": "train",        "pos": "noun", "level": "A1", "gender": "m" },
+        { "ru": "самолёт",   "en": "airplane",     "pos": "noun", "level": "A1", "gender": "m" },
+        { "ru": "корабль",   "en": "ship",         "pos": "noun", "level": "A1", "gender": "m" },
+        { "ru": "велосипед", "en": "bicycle",      "pos": "noun", "level": "A1", "gender": "m" },
+
+        { "ru": "метро",     "en": "subway/metro", "pos": "noun", "level": "A2", "gender": "indecl" },
+        { "ru": "такси",     "en": "taxi",         "pos": "noun", "level": "A2", "gender": "indecl" },
+        { "ru": "трамвай",   "en": "tram",         "pos": "noun", "level": "A2", "gender": "m" },
+        { "ru": "остановка", "en": "stop (bus/tram)","pos":"noun", "level": "A2", "gender": "f" },
+        { "ru": "билет",     "en": "ticket",       "pos": "noun", "level": "A2", "gender": "m" }
+      ]
+    },
+    {
+      "id": "places",
+      "name_ru": "Места",
+      "words": [
+        { "ru": "улица",     "en": "street",          "pos": "noun", "level": "A1", "gender": "f" },
+        { "ru": "парк",      "en": "park",            "pos": "noun", "level": "A1", "gender": "m" },
+        { "ru": "магазин",   "en": "shop/store",      "pos": "noun", "level": "A1", "gender": "m" },
+        { "ru": "садик",     "en": "kindergarten",    "pos": "noun", "level": "A1", "gender": "m" },
+        { "ru": "школа",     "en": "school",          "pos": "noun", "level": "A1", "gender": "f" },
+        { "ru": "врач",      "en": "doctor",          "pos": "noun", "level": "A1", "gender": "m" },
+
+        { "ru": "аптека",    "en": "pharmacy",        "pos": "noun", "level": "A2", "gender": "f" },
+        { "ru": "библиотека","en": "library",         "pos": "noun", "level": "A2", "gender": "f" },
+        { "ru": "кафе",      "en": "cafe",            "pos": "noun", "level": "A2", "gender": "indecl" },
+        { "ru": "кино",      "en": "cinema",          "pos": "noun", "level": "A2", "gender": "indecl" },
+        { "ru": "почта",     "en": "post office",     "pos": "noun", "level": "A2", "gender": "f" },
+        { "ru": "рынок",     "en": "market",          "pos": "noun", "level": "A2", "gender": "m" },
+        { "ru": "музей",     "en": "museum",          "pos": "noun", "level": "A2", "gender": "m" }
+      ]
+    },
+    {
+      "id": "feelings",
+      "name_ru": "Чувства и состояния",
+      "words": [
+        { "ru": "хочу",       "en": "I want",            "pos": "verb",   "level": "A1" },
+        { "ru": "не хочу",    "en": "I don't want",      "pos": "phrase", "level": "A1" },
+        { "ru": "нравится",   "en": "I like",            "pos": "verb",   "level": "A1" },
+        { "ru": "не нравится","en": "I don't like",      "pos": "phrase", "level": "A1" },
+        { "ru": "больно",     "en": "it hurts",          "pos": "adv",    "level": "A1" },
+        { "ru": "холодно",    "en": "cold",              "pos": "adv",    "level": "A1" },
+        { "ru": "жарко",      "en": "hot",               "pos": "adv",    "level": "A1" },
+        { "ru": "весело",     "en": "fun",               "pos": "adv",    "level": "A1" },
+        { "ru": "грустно",    "en": "sad",               "pos": "adv",    "level": "A1" },
+        { "ru": "страшно",    "en": "scary/afraid",      "pos": "adv",    "level": "A1" },
+        {
+          "ru": "устал",      "en": "tired",             "pos": "adj",    "level": "A1",
+          "forms": { "m": "устал", "f": "устала", "n": "устало", "pl": "устали" }
+        },
+
+        {
+          "ru": "голодный",   "en": "hungry",            "pos": "adj",    "level": "A2",
+          "forms": { "m": "голодный", "f": "голодная", "n": "голодное", "pl": "голодные" }
+        },
+        { "ru": "хочу пить",  "en": "I'm thirsty (lit. I want to drink)", "pos": "phrase", "level": "A2" },
+        {
+          "ru": "счастлив",   "en": "happy",             "pos": "adj",    "level": "A2",
+          "forms": { "m": "счастлив", "f": "счастлива", "n": "счастливо", "pl": "счастливы" }
+        },
+        {
+          "ru": "злой",       "en": "angry",             "pos": "adj",    "level": "A2",
+          "forms": { "m": "злой", "f": "злая", "n": "злое", "pl": "злые" }
+        },
+        { "ru": "скучно",     "en": "bored",             "pos": "adv",    "level": "A2" },
+        {
+          "ru": "удивлён",    "en": "surprised",         "pos": "adj",    "level": "A2",
+          "forms": { "m": "удивлён", "f": "удивлена", "n": "удивлено", "pl": "удивлены" }
+        }
+      ]
+    },
+    {
+      "id": "size",
+      "name_ru": "Размер и формы",
+      "words": [
+        {
+          "ru": "большой",    "en": "big",        "pos": "adj", "level": "A1",
+          "forms": { "m": "большой",   "f": "большая",   "n": "большое",   "pl": "большие" }
+        },
+        {
+          "ru": "маленький",  "en": "small",      "pos": "adj", "level": "A1",
+          "forms": { "m": "маленький", "f": "маленькая", "n": "маленькое", "pl": "маленькие" }
+        },
+        {
+          "ru": "длинный",    "en": "long",       "pos": "adj", "level": "A1",
+          "forms": { "m": "длинный",   "f": "длинная",   "n": "длинное",   "pl": "длинные" }
+        },
+        {
+          "ru": "короткий",   "en": "short",      "pos": "adj", "level": "A1",
+          "forms": { "m": "короткий",  "f": "короткая",  "n": "короткое",  "pl": "короткие" }
+        },
+        { "ru": "круг",      "en": "circle",     "pos": "noun", "level": "A1", "gender": "m" },
+        { "ru": "квадрат",   "en": "square",     "pos": "noun", "level": "A1", "gender": "m" },
+
+        {
+          "ru": "высокий",    "en": "tall/high",  "pos": "adj", "level": "A2",
+          "forms": { "m": "высокий",   "f": "высокая",   "n": "высокое",   "pl": "высокие" }
+        },
+        {
+          "ru": "низкий",     "en": "short/low",  "pos": "adj", "level": "A2",
+          "forms": { "m": "низкий",    "f": "низкая",    "n": "низкое",    "pl": "низкие" }
+        },
+        {
+          "ru": "толстый",    "en": "thick/fat",  "pos": "adj", "level": "A2",
+          "forms": { "m": "толстый",   "f": "толстая",   "n": "толстое",   "pl": "толстые" }
+        },
+        {
+          "ru": "тонкий",     "en": "thin",       "pos": "adj", "level": "A2",
+          "forms": { "m": "тонкий",    "f": "тонкая",    "n": "тонкое",    "pl": "тонкие" }
+        },
+        { "ru": "треугольник",  "en": "triangle",  "pos": "noun", "level": "A2", "gender": "m" },
+        { "ru": "прямоугольник","en": "rectangle", "pos": "noun", "level": "A2", "gender": "m" }
+      ]
+    },
+    {
+      "id": "school_supplies",
+      "name_ru": "Для рисования и простые вещи",
+      "words": [
+        { "ru": "карандаш",  "en": "pencil",    "pos": "noun", "level": "A1", "gender": "m" },
+        { "ru": "ручка",     "en": "pen",       "pos": "noun", "level": "A1", "gender": "f" },
+        { "ru": "бумага",    "en": "paper",     "pos": "noun", "level": "A1", "gender": "f" },
+        { "ru": "краска",    "en": "paint",     "pos": "noun", "level": "A1", "gender": "f" },
+        { "ru": "кисть",     "en": "brush",     "pos": "noun", "level": "A1", "gender": "f" },
+        { "ru": "клей",      "en": "glue",      "pos": "noun", "level": "A1", "gender": "m" },
+        { "ru": "ножницы",   "en": "scissors",  "pos": "noun", "level": "A1", "gender": "pl" },
+
+        { "ru": "тетрадь",   "en": "notebook",  "pos": "noun", "level": "A2", "gender": "f" },
+        { "ru": "учебник",   "en": "textbook",  "pos": "noun", "level": "A2", "gender": "m" },
+        { "ru": "линейка",   "en": "ruler",     "pos": "noun", "level": "A2", "gender": "f" },
+        { "ru": "ластик",    "en": "eraser",    "pos": "noun", "level": "A2", "gender": "m" },
+        { "ru": "фломастер", "en": "marker",    "pos": "noun", "level": "A2", "gender": "m" },
+        { "ru": "рюкзак",    "en": "backpack",  "pos": "noun", "level": "A2", "gender": "m" }
+      ]
+    }
+  ]
+}

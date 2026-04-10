@@ -15,17 +15,26 @@ BTN_H = 50
 BTN_W = 140
 PADDING = 20
 
-# Colors
-BG_COLOR = (245, 247, 250)
-HEADER_BG = (255, 255, 255)
-TEXT_COLOR = (40, 45, 60)
-MUTED_COLOR = (100, 110, 125)
-GREEN = (46, 204, 113)
-RED = (231, 76, 60)
-BLUE_ACCENT = (52, 152, 219)
-SHADOW = (0, 0, 0, 30)
-WHITE = (255, 255, 255)
-BLACK = (0, 0, 0)
+# Colors (pastel style — match launcher.py palette)
+PURPLE   = (156, 137, 184)   # #9C89B8
+PINK     = (240, 166, 202)   # #F0A6CA
+LIGHT_P  = (239, 195, 230)   # #EFC3E6
+CREAM    = (240, 230, 239)   # #F0E6EF
+LAVENDER = (184, 190, 221)   # #B8BEDD
+TEXT_DARK = (58, 50, 72)
+TEXT_DARK_80 = (78, 68, 95)
+SHADOW_FILL = (190, 185, 174)
+# Legacy names for minimal code change
+BG_COLOR = CREAM
+HEADER_BG = LAVENDER
+TEXT_COLOR = TEXT_DARK
+MUTED_COLOR = TEXT_DARK_80
+GREEN = (129, 199, 132)      # soft green (correct)
+RED = (239, 150, 150)       # soft red (wrong)
+BLUE_ACCENT = PURPLE
+SHADOW = SHADOW_FILL
+WHITE = CREAM
+BLACK = PURPLE
 
 # Tolerances
 TOL_ON = 25
@@ -58,6 +67,16 @@ RUS_DICT = {
 
 def get_rus_name(eng_name, case="acc"):
     return RUS_DICT.get(eng_name, {}).get(case, eng_name)
+
+def _best_font(size, bold=False):
+    for name in ("Nunito", "Baloo 2", "Ubuntu", "Noto Sans", "DejaVu Sans", "Arial", ""):
+        try:
+            f = pygame.font.SysFont(name, max(14, size), bold=bold)
+            if f:
+                return f
+        except Exception:
+            pass
+    return pygame.font.Font(None, max(14, size))
 
 # -----------------------
 # UI Helpers
@@ -113,34 +132,28 @@ class Button:
         self.icon_only = icon_only
 
     def draw(self, screen, font):
-        # Shadow
+        # Soft shadow (pastel)
         shadow_rect = self.rect.copy()
+        shadow_rect.x += 3
         shadow_rect.y += 4
-        pygame.draw.rect(screen, SHADOW, shadow_rect, border_radius=12)
-
+        pygame.draw.rect(screen, SHADOW_FILL, shadow_rect, border_radius=14)
         # Body
-        col = (min(self.bg_color[0]+10, 255), min(self.bg_color[1]+10, 255), min(self.bg_color[2]+10, 255)) if self.hovered else self.bg_color
-        pygame.draw.rect(screen, col, self.rect, border_radius=12)
-        
+        col = (min(self.bg_color[0] + 12, 255), min(self.bg_color[1] + 12, 255), min(self.bg_color[2] + 12, 255)) if self.hovered else self.bg_color
+        pygame.draw.rect(screen, col, self.rect, border_radius=14)
         # Border
-        border_col = BLUE_ACCENT if self.hovered else (200, 200, 200)
-        pygame.draw.rect(screen, border_col, self.rect, 2, border_radius=12)
+        border_col = PURPLE if self.hovered else LAVENDER
+        pygame.draw.rect(screen, border_col, self.rect, 2, border_radius=14)
 
         if self.icon_only:
-            # Draw a simple "Speaker" icon
             cx, cy = self.rect.center
-            # Speaker body
-            icon_color = WHITE if self.bg_color == BLUE_ACCENT else self.text_color
-            
+            icon_color = CREAM if self.bg_color == BLUE_ACCENT else self.text_color
             pygame.draw.polygon(screen, icon_color, [
                 (cx - 5, cy - 5), (cx - 5, cy + 5), (cx + 5, cy + 5), (cx + 5, cy - 5)
             ])
-            # Speaker cone
             pygame.draw.polygon(screen, icon_color, [
                 (cx + 5, cy - 5), (cx + 12, cy - 10), (cx + 12, cy + 10), (cx + 5, cy + 5)
             ])
         else:
-            # Text
             txt = font.render(self.label, True, self.text_color)
             screen.blit(txt, txt.get_rect(center=self.rect.center))
 
@@ -329,7 +342,7 @@ def make_items(names):
         w, h = sizes[n]
         x = random.randint(50, V_WIDTH - w - 50)
         y = random.randint(HEADER_H + 50, V_HEIGHT - h - 50)
-        items[n] = Item(n, x, y, w, h, colors.get(n, (200,200,200)))
+        items[n] = Item(n, x, y, w, h, colors.get(n, LAVENDER))
     return items
 
 # -----------------------
@@ -347,23 +360,20 @@ def main():
     canvas = pygame.Surface((V_WIDTH, V_HEIGHT))
     clock = pygame.time.Clock()
 
-    font_names = ["Arial", "Helvetica", "DejaVu Sans", "Segoe UI"]
-    font_xl = pygame.font.SysFont(font_names, 42, bold=True)
-    font_lg = pygame.font.SysFont(font_names, 32)
-    font_md = pygame.font.SysFont(font_names, 24)
-    font_sm = pygame.font.SysFont(font_names, 20)
+    font_xl = _best_font(42, bold=True)
+    font_lg = _best_font(32)
+    font_md = _best_font(24)
+    font_sm = _best_font(20)
 
-    # UI Buttons
+    # UI Buttons (pastel palette)
     btn_y = 30
-    btn_check  = Button(V_WIDTH - (3 * (BTN_W + 10)) - 20, btn_y, BTN_W, BTN_H, "Check")
-    btn_reset  = Button(V_WIDTH - (2 * (BTN_W + 10)) - 20, btn_y, BTN_W, BTN_H, "Reset")
-    btn_next   = Button(V_WIDTH - (1 * (BTN_W + 10)) - 20, btn_y, BTN_W, BTN_H, "Next", bg_color=BLUE_ACCENT, text_color=WHITE)
-    
-    # Speaker Button (Blue accent to be visible)
-    btn_speaker = Button(0, 0, 50, 50, "", bg_color=BLUE_ACCENT, text_color=WHITE, icon_only=True)
+    btn_check  = Button(V_WIDTH - (3 * (BTN_W + 10)) - 20, btn_y, BTN_W, BTN_H, "Check", bg_color=LAVENDER, text_color=TEXT_DARK)
+    btn_reset  = Button(V_WIDTH - (2 * (BTN_W + 10)) - 20, btn_y, BTN_W, BTN_H, "Reset", bg_color=LAVENDER, text_color=TEXT_DARK)
+    btn_next   = Button(V_WIDTH - (1 * (BTN_W + 10)) - 20, btn_y, BTN_W, BTN_H, "Next", bg_color=PURPLE, text_color=CREAM)
 
-    # Restart button (used on the final score screen)
-    btn_restart = Button(V_WIDTH // 2 - 160, V_HEIGHT // 2 + 80, 320, 60, "Сыграть снова", bg_color=BLUE_ACCENT, text_color=WHITE)
+    btn_speaker = Button(0, 0, 50, 50, "", bg_color=PINK, text_color=CREAM, icon_only=True)
+
+    btn_restart = Button(V_WIDTH // 2 - 160, V_HEIGHT // 2 + 80, 320, 60, "Сыграть снова", bg_color=PURPLE, text_color=CREAM)
 
     buttons = [btn_check, btn_reset, btn_next, btn_speaker, btn_restart]
 
@@ -512,8 +522,9 @@ def main():
         if feedback and time.time() - fb_timer > 3: feedback = ""
 
         canvas.fill(BG_COLOR)
-        pygame.draw.rect(canvas, HEADER_BG, (0, 0, V_WIDTH, HEADER_H))
-        pygame.draw.line(canvas, (220, 225, 230), (0, HEADER_H), (V_WIDTH, HEADER_H), 2)
+        pygame.draw.rect(canvas, PINK, (0, 0, V_WIDTH, HEADER_H - 8))
+        pygame.draw.rect(canvas, LIGHT_P, (0, HEADER_H - 8, V_WIDTH, 8))
+        pygame.draw.line(canvas, LAVENDER, (0, HEADER_H), (V_WIDTH, HEADER_H), 2)
         
         # Score (left) + example counter (center)
         score_surf = font_lg.render(f"Счёт: {score}/{len(SCENARIOS)}", True, TEXT_COLOR)
@@ -536,25 +547,25 @@ def main():
             btn_speaker.draw(canvas, font_md)
 
         if not game_over:
-            hint_surf = font_sm.render("Перетащите объекты, следуя инструкции.", True, (160, 170, 180))
+            hint_surf = font_sm.render("Перетащите объекты, следуя инструкции.", True, MUTED_COLOR)
             canvas.blit(hint_surf, (V_WIDTH - hint_surf.get_width() - 20, V_HEIGHT - 30))
 
-        # Final score overlay
+        # Final score overlay (pastel)
         if game_over:
             overlay = pygame.Surface((V_WIDTH, V_HEIGHT), pygame.SRCALPHA)
-            overlay.fill((0, 0, 0, 120))
+            overlay.fill((58, 50, 72, 140))
             canvas.blit(overlay, (0, 0))
 
             panel = pygame.Rect(V_WIDTH // 2 - 360, V_HEIGHT // 2 - 160, 720, 320)
             panel_surf = pygame.Surface((panel.width, panel.height), pygame.SRCALPHA)
-            panel_surf.fill((255, 255, 255, 245))
+            panel_surf.fill((*CREAM, 250))
             canvas.blit(panel_surf, panel.topleft)
-            pygame.draw.rect(canvas, (200, 200, 200), panel, 2, border_radius=18)
+            pygame.draw.rect(canvas, PURPLE, panel, 2, border_radius=20)
 
             done_title = font_xl.render("Игра окончена!", True, TEXT_COLOR)
             canvas.blit(done_title, done_title.get_rect(center=(V_WIDTH // 2, panel.top + 70)))
 
-            score_big = font_xl.render(f"Ваш счёт: {score} / {len(SCENARIOS)}", True, BLUE_ACCENT)
+            score_big = font_xl.render(f"Ваш счёт: {score} / {len(SCENARIOS)}", True, PURPLE)
             canvas.blit(score_big, score_big.get_rect(center=(V_WIDTH // 2, panel.top + 140)))
 
             tip = font_md.render("Нажмите «Сыграть снова», чтобы начать заново.", True, MUTED_COLOR)
@@ -574,13 +585,14 @@ def main():
             fb_rect = fb_surf.get_rect(center=(V_WIDTH // 2, V_HEIGHT - 95))
             bg_rect = fb_rect.inflate(40, 20)
             s = pygame.Surface((bg_rect.width, bg_rect.height), pygame.SRCALPHA)
-            s.fill((255, 255, 255, 230))
+            s.fill((*LAVENDER, 248))
             canvas.blit(s, bg_rect.topleft)
-            pygame.draw.rect(canvas, (200, 200, 200), bg_rect, 2, border_radius=15)
+            pygame.draw.rect(canvas, PURPLE, bg_rect, 2, border_radius=16)
             canvas.blit(fb_surf, fb_rect.topleft)
 
         scaled_surf = pygame.transform.smoothscale(canvas, (new_w, new_h))
-        if offset_x > 0 or offset_y > 0: screen.fill((30, 30, 30)) 
+        if offset_x > 0 or offset_y > 0:
+            screen.fill(TEXT_DARK)
         screen.blit(scaled_surf, (offset_x, offset_y))
         pygame.display.flip()
 

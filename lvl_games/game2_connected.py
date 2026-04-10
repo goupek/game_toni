@@ -1,42 +1,77 @@
+"""
+game2 connected to the shared word-knowledge store.
+
+Identical to game2.py with two changes:
+  1. generate_round() is replaced by generate_round_filtered() so that rounds
+     only use words the kid has NOT yet mastered (according to word_knowledge.json).
+  2. On startup, ensure_game2_words_present() is called to register any game2
+     vocabulary that isn't in word_knowledge.json yet.
+
+Run directly:
+    python lvl_games/game2_connected.py
+
+Workflow
+--------
+1. Run lvl_game_connected.py  → plays the level-identification game
+                               → saves word_knowledge.json
+2. Run game2_connected.py     → reads word_knowledge.json
+                               → skips words the kid already knows
+"""
+
 import os
 import sys
+from pathlib import Path
+
+# Allow imports from the repo root (image_utils, question_generation, …)
+_HERE   = Path(__file__).resolve().parent   # lvl_games/
+_ROOT   = _HERE.parent                      # repo root
+
+for p in [str(_HERE), str(_ROOT)]:
+    if p not in sys.path:
+        sys.path.insert(0, p)
+
 import pygame
 
-from question_generation import generate_round
+from question_generation_filtered import generate_round_filtered   # NEW (replaces generate_round)
+from word_knowledge import ensure_game2_words_present              # NEW
 from image_utils import build_round_surface
 
 # -----------------------------
-# SETTINGS
+# SETTINGS  (unchanged)
 # -----------------------------
 DESIGN_W, DESIGN_H = 1024, 768
 FPS = 60
 
 ROUNDS_PER_GAME = 10
-ROUND_CANVAS_SIZE = (800, 800)  # square "card" that we scale-fit into image_area
+ROUND_CANVAS_SIZE = (800, 800)
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-IMG_DIR = os.path.join(BASE_DIR, "images")
+BASE_DIR  = str(_ROOT)
+IMG_DIR   = os.path.join(BASE_DIR, "images")
 AUDIO_DIR = os.path.join(BASE_DIR, "audio")
 
-# Colors
-BG = (245, 248, 255)
-WHITE = (255, 255, 255)
-BLACK = (15, 15, 15)
-GRAY = (230, 230, 230)
-DARK = (90, 90, 90)
-BLUE = (70, 130, 240)
-GREEN = (40, 190, 90)
-RED = (235, 60, 60)
+# Pastel style (match launcher.py palette)
+PURPLE   = (156, 137, 184)   # #9C89B8
+PINK     = (240, 166, 202)   # #F0A6CA
+LIGHT_P  = (239, 195, 230)   # #EFC3E6
+CREAM    = (240, 230, 239)   # #F0E6EF
+LAVENDER = (184, 190, 221)   # #B8BEDD
+TEXT_DARK = (58, 50, 72)
+SHADOW_FILL = (190, 185, 174)
+BG    = CREAM
+WHITE = CREAM
+BLACK = TEXT_DARK
+GRAY  = LAVENDER
+DARK  = PURPLE
+BLUE  = PURPLE
+GREEN = (129, 199, 132)      # soft green (correct)
+RED   = (239, 150, 150)      # soft red (wrong)
 
-# Timing
 WORD_TO_FEEDBACK_DELAY_MS = 1000
-CORRECT_NEXT_DELAY_MS = 2000
+CORRECT_NEXT_DELAY_MS     = 2000
 
-# Replay icon file (put this in ./images/)
 REPLAY_ICON_FILE = "replay.jpg"
 
-# Feedback sounds (put in ./audio/)
-SND_GREAT = "great.mp3"
+SND_GREAT     = "great.mp3"
 SND_TRY_AGAIN = "try_again.mp3"
 
 TTS_DIR = os.path.join(BASE_DIR, "tts_out")
@@ -50,10 +85,19 @@ def audio_path(filename):
 def image_path(filename):
     return os.path.join(IMG_DIR, filename)
 
+def _best_font(size, bold=False):
+    for name in ("Nunito", "Baloo 2", "Ubuntu", "Noto Sans", "DejaVu Sans", "Arial", ""):
+        try:
+            f = pygame.font.SysFont(name, max(14, size), bold=bold)
+            if f:
+                return f
+        except Exception:
+            pass
+    return pygame.font.Font(None, max(14, size))
+
 # -----------------------------
-# TTS AUDIO (wav clips in ./tts_out)
+# TTS AUDIO
 # -----------------------------
-# Your provided dictionary: filename -> word/phrase
 TTS_FILES = {
     "1_m.wav": "один",
     "1_f.wav": "одна",
@@ -61,91 +105,93 @@ TTS_FILES = {
     "2_m.wav": "два",
     "2_f.wav": "две",
     "2_n.wav": "два",
-    "3.wav": "три",
-    "4.wav": "четыре",
-    "5.wav": "пять",
+    "3.wav":   "три",
+    "4.wav":   "четыре",
+    "5.wav":   "пять",
 
-    "dog_sg.wav": "собака",
-    "dog_pl.wav": "собаки",
+    "dog_sg.wav":     "собака",
+    "dog_pl.wav":     "собаки",
     "dog_gen_pl.wav": "собак",
 
-    "cat_sg.wav": "кошка",
-    "cat_pl.wav": "кошки",
+    "cat_sg.wav":     "кошка",
+    "cat_pl.wav":     "кошки",
     "cat_gen_pl.wav": "кошек",
 
-    "car_sg.wav": "машина",
-    "car_pl.wav": "машины",
+    "car_sg.wav":     "машина",
+    "car_pl.wav":     "машины",
     "car_gen_pl.wav": "машин",
 
-    "ball_sg.wav": "мяч",
-    "ball_pl.wav": "мячи",
+    "ball_sg.wav":     "мяч",
+    "ball_pl.wav":     "мячи",
     "ball_gen_pl.wav": "мячей",
 
-    "red_m.wav": "красный",
-    "red_f.wav": "красная",
-    "red_n.wav": "красное",
-    "red_pl.wav": "красные",
+    "red_m.wav":    "красный",
+    "red_f.wav":    "красная",
+    "red_n.wav":    "красное",
+    "red_pl.wav":   "красные",
 
-    "blue_m.wav": "синий",
-    "blue_f.wav": "синяя",
-    "blue_n.wav": "синее",
-    "blue_pl.wav": "синие",
+    "blue_m.wav":   "синий",
+    "blue_f.wav":   "синяя",
+    "blue_n.wav":   "синее",
+    "blue_pl.wav":  "синие",
 
-    "light_blue_m.wav": "голубой",
-    "light_blue_f.wav": "голубая",
-    "light_blue_n.wav": "голубое",
+    "light_blue_m.wav":  "голубой",
+    "light_blue_f.wav":  "голубая",
+    "light_blue_n.wav":  "голубое",
     "light_blue_pl.wav": "голубые",
 
-    "green_m.wav": "зелёный",
-    "green_f.wav": "зелёная",
-    "green_n.wav": "зелёное",
-    "green_pl.wav": "зелёные",
+    "green_m.wav":   "зелёный",
+    "green_f.wav":   "зелёная",
+    "green_n.wav":   "зелёное",
+    "green_pl.wav":  "зелёные",
 
-    "white_m.wav": "белый",
-    "white_f.wav": "белая",
-    "white_n.wav": "белое",
-    "white_pl.wav": "белые",
+    "white_m.wav":   "белый",
+    "white_f.wav":   "белая",
+    "white_n.wav":   "белое",
+    "white_pl.wav":  "белые",
 
-    "yellow_m.wav": "жёлтый",
-    "yellow_f.wav": "жёлтая",
-    "yellow_n.wav": "жёлтое",
+    "yellow_m.wav":  "жёлтый",
+    "yellow_f.wav":  "жёлтая",
+    "yellow_n.wav":  "жёлтое",
     "yellow_pl.wav": "жёлтые",
 
-    "purple_m.wav": "фиолетовый",
-    "purple_f.wav": "фиолетовая",
-    "purple_n.wav": "фиолетовое",
+    "purple_m.wav":  "фиолетовый",
+    "purple_f.wav":  "фиолетовая",
+    "purple_n.wav":  "фиолетовое",
     "purple_pl.wav": "фиолетовые",
 
-    "pink_m.wav": "розовый",
-    "pink_f.wav": "розовая",
-    "pink_n.wav": "розовое",
-    "pink_pl.wav": "розовые",
+    "pink_m.wav":    "розовый",
+    "pink_f.wav":    "розовая",
+    "pink_n.wav":    "розовое",
+    "pink_pl.wav":   "розовые",
 
-    "grey_m.wav": "серый",
-    "grey_f.wav": "серая",
-    "grey_n.wav": "серое",
-    "grey_pl.wav": "серые",
+    "grey_m.wav":    "серый",
+    "grey_f.wav":    "серая",
+    "grey_n.wav":    "серое",
+    "grey_pl.wav":   "серые",
 
-    "brown_m.wav": "коричневый",
-    "brown_f.wav": "коричневая",
-    "brown_n.wav": "коричневое",
-    "brown_pl.wav": "коричневые",
+    "brown_m.wav":   "коричневый",
+    "brown_f.wav":   "коричневая",
+    "brown_n.wav":   "коричневое",
+    "brown_pl.wav":  "коричневые",
 
     "q_color.wav": "Какого цвета",
     "q_count.wav": "Сколько",
-    "q_tail.wav": "на картинке?",
+    "q_tail.wav":  "на картинке?",
 }
 
-# Invert: word/phrase -> filename
 WORD_TO_WAV = {v: k for k, v in TTS_FILES.items()}
 
 def tts_path(filename):
     return os.path.join(TTS_DIR, filename)
 
+# -----------------------------
+# AUDIO
+# -----------------------------
 class AudioBank:
     def __init__(self):
         self.cache = {}
-        self.ch = pygame.mixer.Channel(0)
+        self.ch    = pygame.mixer.Channel(0)
         self.queue = []
 
     def _load(self, filename):
@@ -163,7 +209,7 @@ class AudioBank:
         snd = self._load(filename)
         if not snd:
             return
-        self.queue = []           # clear any sequence
+        self.queue = []
         self.ch.stop()
         self.ch.play(snd)
 
@@ -174,13 +220,12 @@ class AudioBank:
     def _play_next(self):
         if not self.queue:
             return
-        fn = self.queue.pop(0)
+        fn  = self.queue.pop(0)
         snd = self._load(fn)
         if snd:
             self.ch.play(snd)
 
     def update(self):
-        # Call this every frame from game loop
         if not self.ch.get_busy() and self.queue:
             self._play_next()
 
@@ -188,26 +233,20 @@ def wav_for_word(word_or_phrase):
     return WORD_TO_WAV.get(word_or_phrase)
 
 def noun_clip(noun_key, form_key):
-    # form_key: "sg" | "pl" | "gen_pl"
     return "{}_{}.wav".format(noun_key, form_key)
 
 def question_clips(round_data):
-    # generator uses these prompt templates :contentReference[oaicite:1]{index=1}
     noun_key = round_data["noun_key"]
-    count = round_data["count"]
-    qtype = round_data["qtype"]
+    count    = round_data["count"]
+    qtype    = round_data["qtype"]
 
     if qtype == "count":
         return ["q_count.wav", noun_clip(noun_key, "gen_pl"), "q_tail.wav"]
 
-    # qtype == "color"
     form = "sg" if count == 1 else "pl"
     return ["q_color.wav", noun_clip(noun_key, form), "q_tail.wav"]
 
 
-# -----------------------------
-# AUDIO (single channel, no overlap)
-# -----------------------------
 def play_audio(filename):
     if not filename:
         return
@@ -228,7 +267,7 @@ def play_audio(filename):
 def wrap_text(text, font, max_width):
     words = text.split()
     lines = []
-    cur = ""
+    cur   = ""
     for w in words:
         test = (cur + " " + w).strip()
         if font.size(test)[0] <= max_width:
@@ -242,7 +281,7 @@ def wrap_text(text, font, max_width):
     return lines
 
 # -----------------------------
-# IMAGE LOADING + FIT (NO CROP)
+# IMAGE LOADING
 # -----------------------------
 def load_image(filename):
     path = image_path(filename)
@@ -259,18 +298,20 @@ def scale_fit(surface, target_w, target_h):
     if sw == 0 or sh == 0:
         return surface
     scale = min(target_w / sw, target_h / sh)
-    new_w, new_h = max(1, int(sw * scale)), max(1, int(sh * scale))
+    new_w = max(1, int(sw * scale))
+    new_h = max(1, int(sh * scale))
     return pygame.transform.smoothscale(surface, (new_w, new_h))
 
 # -----------------------------
-# UI BUTTON (with replay icon area)
+# BUTTON
 # -----------------------------
 class Button:
-    def __init__(self, rect, label, show_replay=False):
-        self.rect = pygame.Rect(rect)
-        self.label = label
-        self.border = DARK
-        self.bg = WHITE
+    def __init__(self, rect, label, show_replay=False, bg=None, text_color=None):
+        self.rect        = pygame.Rect(rect)
+        self.label       = label
+        self.border      = DARK
+        self.bg          = bg if bg is not None else LAVENDER
+        self.text_color  = text_color if text_color is not None else BLACK
         self.show_replay = show_replay
         self.replay_rect = None
 
@@ -287,28 +328,29 @@ class Button:
         return self.replay_rect is not None and self.replay_rect.collidepoint(pos)
 
     def draw(self, screen, font, border_w, s, replay_icon_surf=None):
-        pygame.draw.rect(screen, self.bg, self.rect, border_radius=12)
-        pygame.draw.rect(screen, self.border, self.rect, width=border_w, border_radius=12)
+        # Soft shadow (pastel)
+        shadow_r = self.rect.move(3, 4)
+        pygame.draw.rect(screen, SHADOW_FILL, shadow_r, border_radius=14)
+        pygame.draw.rect(screen, self.bg, self.rect, border_radius=14)
+        pygame.draw.rect(screen, self.border, self.rect, width=border_w, border_radius=14)
 
         replay_space = int(90 * s) if self.show_replay else 0
-        text_area = self.rect.copy()
+        text_area    = self.rect.copy()
         text_area.w -= replay_space
 
-        txt = font.render(self.label, True, BLACK)
+        txt = font.render(self.label, True, self.text_color)
         screen.blit(txt, txt.get_rect(center=text_area.center))
 
         if self.show_replay:
             icon_size = int(54 * s)
-            icon_pad = int(12 * s)
+            icon_pad  = int(12 * s)
             self.replay_rect = pygame.Rect(
                 self.rect.right - icon_size - icon_pad,
                 self.rect.centery - icon_size // 2,
-                icon_size,
-                icon_size
+                icon_size, icon_size,
             )
-            pygame.draw.rect(screen, WHITE, self.replay_rect, border_radius=10)
-            pygame.draw.rect(screen, DARK, self.replay_rect, 2, border_radius=10)
-
+            pygame.draw.rect(screen, WHITE, self.replay_rect, border_radius=12)
+            pygame.draw.rect(screen, DARK, self.replay_rect, 2, border_radius=12)
             if replay_icon_surf:
                 icon_rect = replay_icon_surf.get_rect(center=self.replay_rect.center)
                 screen.blit(replay_icon_surf, icon_rect)
@@ -316,18 +358,17 @@ class Button:
             self.replay_rect = None
 
 # -----------------------------
-# SCALING / LAYOUT
+# UI
 # -----------------------------
 class UI:
     def __init__(self, w, h):
-        self.replay_raw = load_image(REPLAY_ICON_FILE)
+        self.replay_raw        = load_image(REPLAY_ICON_FILE)
         self.prompt_replay_icon = None
-        self.btn_replay_icon = None
+        self.btn_replay_icon   = None
         self.rebuild(w, h)
 
     def rebuild(self, w, h):
         self.w, self.h = w, h
-
         sx = w / DESIGN_W
         sy = h / DESIGN_H
         self.s = min(sx, sy)
@@ -335,118 +376,102 @@ class UI:
         def sc(v):
             return max(1, int(v * self.s))
 
-        # Fonts
-        self.font_title = pygame.font.SysFont(None, sc(76))
-        self.font_prompt = pygame.font.SysFont(None, sc(54))
-        self.font_btn = pygame.font.SysFont(None, sc(54))
-        self.font_small = pygame.font.SysFont(None, sc(30))
-        self.font_menu_title = pygame.font.SysFont(None, sc(90))
-        self.font_menu_btn = pygame.font.SysFont(None, sc(60))
+        self.font_title      = _best_font(sc(76), bold=True)
+        self.font_prompt     = _best_font(sc(54))
+        self.font_btn        = _best_font(sc(54))
+        self.font_small      = _best_font(sc(30))
+        self.font_menu_title = _best_font(sc(90), bold=True)
+        self.font_menu_btn   = _best_font(sc(60))
 
         self.border_w = max(2, sc(6))
 
-        side_margin = sc(60)
-        content_left = side_margin
+        side_margin   = sc(60)
+        content_left  = side_margin
         content_right = w - side_margin
-        content_w = content_right - content_left
+        content_w     = content_right - content_left
 
-        v_gap = sc(24)
-        h_gap = sc(40)
+        v_gap   = sc(24)
+        h_gap   = sc(40)
         top_pad = sc(10)
 
-        # Title + Prompt
         self.title_area = pygame.Rect(content_left, top_pad, content_w, sc(70))
-
         self.prompt_area = pygame.Rect(
             content_left,
             self.title_area.bottom + sc(15),
             content_w,
-            sc(150)
+            sc(150),
         )
 
-        # Prompt replay button
         rep_size = sc(64)
-        rep_pad = sc(12)
+        rep_pad  = sc(12)
         self.prompt_replay = pygame.Rect(
             self.prompt_area.right - rep_size - rep_pad,
             self.prompt_area.y + rep_pad,
-            rep_size,
-            rep_size
+            rep_size, rep_size,
         )
 
-        # Progress bar
-        progress_h = sc(24)
-        progress_bottom_pad = sc(60)
+        progress_h           = sc(24)
+        progress_bottom_pad  = sc(60)
         self.progress_bar = pygame.Rect(
             content_left,
             h - progress_bottom_pad,
             content_w,
-            progress_h
+            progress_h,
         )
 
-        # Content region between prompt and progress
-        top_y = self.prompt_area.bottom + v_gap
+        top_y    = self.prompt_area.bottom + v_gap
         bottom_y = self.progress_bar.y - v_gap
         content_h = max(1, bottom_y - top_y)
 
-        # Responsive horizontal split
-        image_w = int(content_w * 0.58)
-        btn_w = content_w - image_w - h_gap
-
+        image_w   = int(content_w * 0.58)
+        btn_w     = content_w - image_w - h_gap
         min_btn_w = sc(260)
         if btn_w < min_btn_w:
-            btn_w = min_btn_w
+            btn_w   = min_btn_w
             image_w = max(sc(260), content_w - btn_w - h_gap)
 
         self.image_area = pygame.Rect(content_left, top_y, image_w, content_h)
         bx = self.image_area.right + h_gap
 
-        # 3 stacked buttons
         btn_gap = sc(24)
-        btn_h = max(sc(80), (content_h - 2 * btn_gap) // 3)
-
+        btn_h   = max(sc(80), (content_h - 2 * btn_gap) // 3)
         self.button_rects = [
             (bx, top_y + 0 * (btn_h + btn_gap), btn_w, btn_h),
             (bx, top_y + 1 * (btn_h + btn_gap), btn_w, btn_h),
             (bx, top_y + 2 * (btn_h + btn_gap), btn_w, btn_h),
         ]
 
-        # Menu buttons
         menu_btn_w, menu_btn_h = sc(300), sc(120)
-        self.menu_play = pygame.Rect((w - menu_btn_w) // 2, sc(330), menu_btn_w, menu_btn_h)
-        self.menu_exit = pygame.Rect((w - menu_btn_w) // 2, sc(480), menu_btn_w, menu_btn_h)
+        self.menu_play  = pygame.Rect((w - menu_btn_w) // 2, sc(330), menu_btn_w, menu_btn_h)
+        self.menu_exit  = pygame.Rect((w - menu_btn_w) // 2, sc(480), menu_btn_w, menu_btn_h)
         self.finish_menu = pygame.Rect((w - menu_btn_w) // 2, sc(500), menu_btn_w, menu_btn_h)
 
-        # Scale replay icons
         if self.replay_raw:
             ps = max(1, int(self.prompt_replay.w * 0.70))
             self.prompt_replay_icon = scale_fit(self.replay_raw, ps, ps)
-
             bs = max(1, int(54 * self.s * 0.80))
-            self.btn_replay_icon = scale_fit(self.replay_raw, bs, bs)
+            self.btn_replay_icon    = scale_fit(self.replay_raw, bs, bs)
         else:
             self.prompt_replay_icon = None
-            self.btn_replay_icon = None
+            self.btn_replay_icon    = None
 
 # -----------------------------
 # MENU
 # -----------------------------
 def run_menu(screen, ui):
-    clock = pygame.time.Clock()
-    play_btn = Button(ui.menu_play, "Play")
+    clock    = pygame.time.Clock()
+    play_btn = Button(ui.menu_play, "Play", bg=PURPLE, text_color=CREAM)
     exit_btn = Button(ui.menu_exit, "Exit")
 
     while True:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 return "quit"
-
             if event.type == pygame.VIDEORESIZE:
                 screen = pygame.display.set_mode((event.w, event.h), pygame.RESIZABLE)
                 ui.rebuild(event.w, event.h)
                 play_btn.rect = ui.menu_play
                 exit_btn.rect = ui.menu_exit
-
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 if play_btn.hit(event.pos):
                     return "play"
@@ -454,8 +479,12 @@ def run_menu(screen, ui):
                     return "quit"
 
         screen.fill(BG)
-        title = ui.font_menu_title.render("Game 2", True, BLACK)
-        screen.blit(title, title.get_rect(center=(ui.w // 2, int(200 * ui.s))))
+        # Pastel header strip
+        header_h = int(140 * ui.s)
+        pygame.draw.rect(screen, PINK, (0, 0, ui.w, header_h - 6))
+        pygame.draw.rect(screen, LIGHT_P, (0, header_h - 6, ui.w, 6))
+        title = ui.font_menu_title.render("Game 2 (adaptive)", True, CREAM)
+        screen.blit(title, title.get_rect(center=(ui.w // 2, header_h // 2)))
 
         play_btn.draw(screen, ui.font_menu_btn, ui.border_w, ui.s, replay_icon_surf=None)
         exit_btn.draw(screen, ui.font_menu_btn, ui.border_w, ui.s, replay_icon_surf=None)
@@ -464,28 +493,32 @@ def run_menu(screen, ui):
         clock.tick(FPS)
 
 # -----------------------------
-# GAME
+# GAME  (only change: generate_round_filtered)
 # -----------------------------
 class StoryGame:
     def __init__(self, screen, ui):
         self.screen = screen
-        self.ui = ui
-        self.clock = pygame.time.Clock()
+        self.ui     = ui
+        self.clock  = pygame.time.Clock()
 
-        self.rounds = [generate_round(option_count=3, max_count=4) for _ in range(ROUNDS_PER_GAME)]
+        # NEW: use filtered generator instead of generate_round
+        self.rounds = [
+            generate_round_filtered(option_count=3, max_count=4)
+            for _ in range(ROUNDS_PER_GAME)
+        ]
 
-        self.index = 0
-        self.score = 0
+        self.index  = 0
+        self.score  = 0
 
-        self.locked = False
+        self.locked               = False
         self.pending_feedback_audio = None
-        self.feedback_time_ms = 0
-        self.advance_time_ms = 0
+        self.feedback_time_ms     = 0
+        self.advance_time_ms      = 0
 
-        self.buttons = []
+        self.buttons   = []
         self.fit_image = None
         self.raw_image = None
-        
+
         self.audio = AudioBank()
         self.load_round(0)
 
@@ -493,10 +526,10 @@ class StoryGame:
         self.index = idx
         rd = self.rounds[self.index]
 
-        self.locked = False
+        self.locked               = False
         self.pending_feedback_audio = None
-        self.feedback_time_ms = 0
-        self.advance_time_ms = 0
+        self.feedback_time_ms     = 0
+        self.advance_time_ms      = 0
 
         self.buttons = []
         for rect, label in zip(self.ui.button_rects, rd["options"]):
@@ -504,7 +537,7 @@ class StoryGame:
 
         self.rescale_current_image()
         self.audio.play_sequence(question_clips(rd))
-    
+
     def speak_question(self):
         rd = self.rounds[self.index]
         self.audio.play_sequence(question_clips(rd))
@@ -516,36 +549,34 @@ class StoryGame:
             return
         self.audio.play(fn)
 
-
     def rescale_current_image(self):
-        rd = self.rounds[self.index]
-
-        # Build a canvas that matches the CURRENT image_area aspect ratio
+        rd       = self.rounds[self.index]
         target_w = max(1, self.ui.image_area.w)
         target_h = max(1, self.ui.image_area.h)
 
         self.raw_image = build_round_surface(IMG_DIR, rd, canvas_size=(target_w, target_h))
 
         pad = max(2, int(20 * self.ui.s))
-        self.fit_image = scale_fit(self.raw_image, target_w - pad, target_h - pad) if self.raw_image else None
-
+        self.fit_image = (
+            scale_fit(self.raw_image, target_w - pad, target_h - pad)
+            if self.raw_image else None
+        )
 
     def on_resize(self, new_w, new_h):
         self.ui.rebuild(new_w, new_h)
-
         new_buttons = []
         for rect, old_btn in zip(self.ui.button_rects, self.buttons):
-            b = Button(rect, old_btn.label, show_replay=True)
-            b.border = old_btn.border
-            b.bg = old_btn.bg
+            b           = Button(rect, old_btn.label, show_replay=True)
+            b.border    = old_btn.border
+            b.bg        = old_btn.bg
+            b.text_color = getattr(old_btn, 'text_color', BLACK)
             new_buttons.append(b)
         self.buttons = new_buttons
-
         self.rescale_current_image()
 
     def draw_progress(self):
         total = len(self.rounds)
-        bar = self.ui.progress_bar
+        bar   = self.ui.progress_bar
 
         pygame.draw.rect(self.screen, GRAY, bar, border_radius=8)
         fill_w = int(bar.w * ((self.index + 1) / total))
@@ -553,7 +584,7 @@ class StoryGame:
         pygame.draw.rect(self.screen, DARK, bar, 2, border_radius=8)
 
         label = "Progress: {}/{}".format(self.index + 1, total)
-        txt = self.ui.font_small.render(label, True, BLACK)
+        txt   = self.ui.font_small.render(label, True, BLACK)
         self.screen.blit(txt, (bar.x, bar.y - txt.get_height() - 6))
 
     def draw(self):
@@ -562,11 +593,11 @@ class StoryGame:
         title = self.ui.font_title.render("Game 2", True, BLACK)
         self.screen.blit(title, (self.ui.title_area.x, self.ui.title_area.y))
 
-        pygame.draw.rect(self.screen, WHITE, self.ui.prompt_area, border_radius=12)
-        pygame.draw.rect(self.screen, DARK, self.ui.prompt_area, 3, border_radius=12)
+        pygame.draw.rect(self.screen, SHADOW_FILL, self.ui.prompt_area.move(3, 4), border_radius=14)
+        pygame.draw.rect(self.screen, LAVENDER, self.ui.prompt_area, border_radius=14)
+        pygame.draw.rect(self.screen, DARK, self.ui.prompt_area, 3, border_radius=14)
 
-        prompt = self.rounds[self.index]["prompt_text"]
-
+        prompt    = self.rounds[self.index]["prompt_text"]
         text_max_w = (
             self.ui.prompt_area.w
             - max(10, int(30 * self.ui.s))
@@ -581,15 +612,17 @@ class StoryGame:
             self.screen.blit(t, (self.ui.prompt_area.x + max(5, int(15 * self.ui.s)), y))
             y += t.get_height() + max(2, int(8 * self.ui.s))
 
-        # Prompt replay button (visual only)
-        pygame.draw.rect(self.screen, WHITE, self.ui.prompt_replay, border_radius=10)
-        pygame.draw.rect(self.screen, DARK, self.ui.prompt_replay, 2, border_radius=10)
+        pygame.draw.rect(self.screen, WHITE, self.ui.prompt_replay, border_radius=12)
+        pygame.draw.rect(self.screen, DARK, self.ui.prompt_replay, 2, border_radius=12)
         if self.ui.prompt_replay_icon:
-            icon_rect = self.ui.prompt_replay_icon.get_rect(center=self.ui.prompt_replay.center)
+            icon_rect = self.ui.prompt_replay_icon.get_rect(
+                center=self.ui.prompt_replay.center,
+            )
             self.screen.blit(self.ui.prompt_replay_icon, icon_rect)
 
-        pygame.draw.rect(self.screen, WHITE, self.ui.image_area, border_radius=12)
-        pygame.draw.rect(self.screen, DARK, self.ui.image_area, 3, border_radius=12)
+        pygame.draw.rect(self.screen, SHADOW_FILL, self.ui.image_area.move(3, 4), border_radius=14)
+        pygame.draw.rect(self.screen, LAVENDER, self.ui.image_area, border_radius=14)
+        pygame.draw.rect(self.screen, DARK, self.ui.image_area, 3, border_radius=14)
 
         if self.fit_image:
             img_rect = self.fit_image.get_rect(center=self.ui.image_area.center)
@@ -599,7 +632,11 @@ class StoryGame:
             self.screen.blit(miss, (self.ui.image_area.x + 20, self.ui.image_area.y + 20))
 
         for b in self.buttons:
-            b.draw(self.screen, self.ui.font_btn, self.ui.border_w, self.ui.s, replay_icon_surf=self.ui.btn_replay_icon)
+            b.draw(
+                self.screen, self.ui.font_btn,
+                self.ui.border_w, self.ui.s,
+                replay_icon_surf=self.ui.btn_replay_icon,
+            )
 
         self.draw_progress()
 
@@ -622,7 +659,7 @@ class StoryGame:
             clicked_btn.set_border(GREEN if label == correct else RED)
 
         self.pending_feedback_audio = SND_GREAT if label == correct else SND_TRY_AGAIN
-        self.feedback_time_ms = now_ms + WORD_TO_FEEDBACK_DELAY_MS
+        self.feedback_time_ms       = now_ms + WORD_TO_FEEDBACK_DELAY_MS
 
         if label == correct:
             self.score += 1
@@ -654,24 +691,23 @@ class StoryGame:
                     return "quit"
 
                 if event.type == pygame.VIDEORESIZE:
-                    self.screen = pygame.display.set_mode((event.w, event.h), pygame.RESIZABLE)
+                    self.screen = pygame.display.set_mode(
+                        (event.w, event.h), pygame.RESIZABLE,
+                    )
                     self.on_resize(event.w, event.h)
 
                 if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_ESCAPE:
                         return "menu"
-                    # Space replay: no audio currently, keep key reserved
                     if event.key == pygame.K_SPACE:
                         pass
 
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                    # prompt replay button
                     if self.ui.prompt_replay.collidepoint(event.pos):
                         self.speak_question()
                         continue
 
                     if not self.locked:
-                        # replay icon on answer buttons (no audio currently)
                         replayed = False
                         for b in self.buttons:
                             if b.hit_replay(event.pos):
@@ -680,7 +716,6 @@ class StoryGame:
                                 break
                         if replayed:
                             continue
-                        # normal answer click
                         for b in self.buttons:
                             if b.hit(event.pos):
                                 self.on_choice(b.label, now_ms)
@@ -698,29 +733,30 @@ class StoryGame:
 # FINISH SCREEN
 # -----------------------------
 def finish_screen(screen, ui, score, total):
-    clock = pygame.time.Clock()
+    clock    = pygame.time.Clock()
     menu_btn = Button(ui.finish_menu, "Menu")
 
     while True:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 return "quit"
-
             if event.type == pygame.VIDEORESIZE:
                 screen = pygame.display.set_mode((event.w, event.h), pygame.RESIZABLE)
                 ui.rebuild(event.w, event.h)
                 menu_btn.rect = ui.finish_menu
-
             if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
                 return "menu"
-
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 if menu_btn.hit(event.pos):
                     return "menu"
 
         screen.fill(BG)
+        # Pastel header strip
+        header_h = int(160 * ui.s)
+        pygame.draw.rect(screen, LIGHT_P, (0, 0, ui.w, header_h - 6))
+        pygame.draw.rect(screen, LAVENDER, (0, header_h - 6, ui.w, 6))
         t1 = ui.font_menu_title.render("Ready!", True, BLACK)
-        t2 = ui.font_menu_btn.render("Score: {}/{}".format(score, total), True, BLACK)
+        t2 = ui.font_menu_btn.render("Score: {}/{}".format(score, total), True, PURPLE)
         screen.blit(t1, t1.get_rect(center=(ui.w // 2, int(240 * ui.s))))
         screen.blit(t2, t2.get_rect(center=(ui.w // 2, int(330 * ui.s))))
 
@@ -733,15 +769,18 @@ def finish_screen(screen, ui, score, total):
 # APP
 # -----------------------------
 def main():
+    # NEW: register game2 vocabulary in word_knowledge.json if not present yet
+    ensure_game2_words_present()
+
     pygame.init()
     pygame.mixer.init()
 
-    info = pygame.display.Info()
+    info    = pygame.display.Info()
     start_w = min(info.current_w, 1024)
     start_h = min(info.current_h, 600)
 
     screen = pygame.display.set_mode((start_w, start_h), pygame.RESIZABLE)
-    pygame.display.set_caption("Game 2")
+    pygame.display.set_caption("Game 2 (adaptive)")
 
     ui = UI(start_w, start_h)
 
@@ -752,7 +791,7 @@ def main():
 
         if action == "play":
             game = StoryGame(screen, ui)
-            res = game.run()
+            res  = game.run()
 
             if res == "quit":
                 break
@@ -765,6 +804,7 @@ def main():
 
     pygame.quit()
     sys.exit()
+
 
 if __name__ == "__main__":
     main()
