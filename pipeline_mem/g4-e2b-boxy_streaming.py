@@ -10,7 +10,7 @@ import traceback
 from collections import deque
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from transliterate import translit
 import numpy as np
@@ -46,7 +46,17 @@ MEMORY_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'mem
 # =========================
 # CONFIGURATION
 # =========================
-MIC_DEVICE = 26  # default system input
+def _parse_device_hint(value: Optional[str]):
+    if value is None:
+        return None
+    value = value.strip()
+    if not value:
+        return None
+    return int(value) if value.lstrip("-").isdigit() else value
+
+
+MIC_DEVICE = _parse_device_hint(os.getenv("BOXY_MIC_DEVICE"))
+LEGACY_MIC_DEVICE = 26  # historical fallback for older Jetson audio setups
 
 WAKE_WORDS = [
     "hey box",
@@ -73,7 +83,7 @@ LLAMA_NUM_PREDICT = 512
 LLAMA_TEMPERATURE = 0.5
 LLAMA_TIMEOUT_SEC = 90
 
-SILERO_MODEL_PATH = "../toni_llm/models/silero/v5_ru.pt"
+SILERO_MODEL_PATH = "./models/silero/v5_ru.pt"
 SILERO_SPEAKER = "xenia"
 SILERO_SAMPLE_RATE = 8000
 
@@ -793,9 +803,10 @@ class VoiceAssistant:
         self.tts.start()
         print("[Init] TTS worker started.")
 
-        self.sample_rate = 16000
+        self.mic_device, self.sample_rate = self._pick_input_device_and_rate()
         self.frame_samples = int(self.sample_rate * FRAME_MS / 1000)
         self.frame_bytes = self.frame_samples * 2
+        print(f"[Init] Mic device: {self._describe_input_device(self.mic_device)}")
         print(f"[Init] Mic sample rate: {self.sample_rate} Hz")
 
         self.whisper = WhisperSTT()
@@ -860,19 +871,81 @@ class VoiceAssistant:
 
         return base
 
-    def _pick_input_rate(self) -> int:
-        for sr in VAD_SUPPORTED_RATES:
-            try:
-                sd.check_input_settings(device=MIC_DEVICE, samplerate=sr, channels=1, dtype="int16")
-                return sr
-            except Exception:
-                continue
+    def _describe_input_device(self, device) -> str:
+        if device is None:
+            return "system default"
+        try:
+            info = sd.query_devices(device, "input")
+            suffix = f" (id={device})" if isinstance(device, int) else ""
+            return f"{info['name']}{suffix}"
+        except Exception:
+            return f"{device!r}"
 
-        info = sd.query_devices(MIC_DEVICE if MIC_DEVICE is not None else None, "input")
-        sr = int(info["default_samplerate"])
-        if sr not in VAD_SUPPORTED_RATES:
-            raise RuntimeError(f"Mic sample rate {sr} not supported. Use one of {VAD_SUPPORTED_RATES}.")
-        return sr
+    def _default_input_device(self):
+        try:
+            default_device = sd.default.device
+        except Exception:
+            return None
+
+        if isinstance(default_device, (tuple, list)):
+            default_input = default_device[0] if default_device else None
+        else:
+            default_input = default_device
+
+        if isinstance(default_input, int) and default_input < 0:
+            return None
+        return default_input
+
+    def _iter_input_device_candidates(self):
+        seen = set()
+        candidates = []
+
+        def add(device):
+            key = (type(device).__name__, device)
+            if device is None and key in seen:
+                return
+            if key in seen:
+                return
+            seen.add(key)
+            candidates.append(device)
+
+        add(MIC_DEVICE)
+        add(self._default_input_device())
+        add(None)
+        add(LEGACY_MIC_DEVICE)
+
+        try:
+            for idx, info in enumerate(sd.query_devices()):
+                if info.get("max_input_channels", 0) > 0:
+                    add(idx)
+        except Exception as e:
+            print(f"[Mic] Could not enumerate audio devices: {e}")
+
+        return candidates
+
+    def _pick_input_device_and_rate(self) -> Tuple[object, int]:
+        errors = []
+
+        for device in self._iter_input_device_candidates():
+            label = self._describe_input_device(device)
+            for sr in VAD_SUPPORTED_RATES:
+                try:
+                    sd.check_input_settings(
+                        device=device,
+                        samplerate=sr,
+                        channels=1,
+                        dtype="int16",
+                    )
+                    print(f"[Mic] Selected input device {label} @ {sr} Hz")
+                    return device, sr
+                except Exception as e:
+                    errors.append(f"{label} @ {sr} Hz -> {e}")
+
+        tried = "\n".join(f"  - {item}" for item in errors[-12:])
+        raise RuntimeError(
+            "No usable microphone input device was found. "
+            f"Tried {len(errors)} device/rate combinations:\n{tried}"
+        )
 
     def _audio_callback(self, indata, frames, time_info, status):
         if status:
@@ -1074,6 +1147,7 @@ class VoiceAssistant:
     def run_forever(self):
         print("==============================================")
         print("Assistant running.")
+        print(f"Input device: {self._describe_input_device(self.mic_device)}")
         print(f"Sample rate: {self.sample_rate} Hz | Frame: {FRAME_MS} ms")
         print(f"Wake words: {WAKE_WORDS}")
         print(f"Memory: {'enabled' if self.core_mem else 'disabled'}")
@@ -1085,7 +1159,7 @@ class VoiceAssistant:
             dtype="int16",
             channels=1,
             callback=self._audio_callback,
-            device=MIC_DEVICE,
+            device=self.mic_device,
         ):
             print("[Mic] Input stream open. Listening for wake word...")
             try:
