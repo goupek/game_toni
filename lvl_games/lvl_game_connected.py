@@ -211,8 +211,8 @@ class ImprovedRussianGame:
         self._asked_total = 0
         self._topic_recent: List[str] = []
 
-        self.min_questions_for_stop  = 5
-        self.max_questions_hard_stop = 10
+        self.min_questions_for_stop  = 20
+        self.max_questions_hard_stop = 40
         self.stability_window  = 10
         self.stability_eps     = 0.035
         self.high_acc_threshold = 0.85

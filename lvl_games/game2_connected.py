@@ -17,7 +17,9 @@ Workflow
 """
 
 import os
+import queue
 import sys
+import threading
 from pathlib import Path
 
 # Allow imports from the repo root (image_utils, question_generation, …)
@@ -33,6 +35,7 @@ import pygame
 from question_generation_filtered import generate_round_filtered   # NEW (replaces generate_round)
 from question_generation import NOUNS, ADJECTIVES, NUM_WORD
 from image_utils import build_round_surface
+from pipeline_mem.llm_tts_hint import HintEngine
 from word_knowledge import update_from_level_game, _NUM_EN_MAP
 
 # -----------------------------
@@ -327,6 +330,7 @@ class UI:
         self.font_title      = _best_font(sc(76), bold=True)
         self.font_prompt     = _best_font(sc(54))
         self.font_btn        = _best_font(sc(54))
+        self.font_hint       = _best_font(sc(28))
         self.font_small      = _best_font(sc(30))
         self.font_menu_title = _best_font(sc(90), bold=True)
         self.font_menu_btn   = _best_font(sc(60))
@@ -343,6 +347,14 @@ class UI:
         top_pad = sc(10)
 
         self.title_area = pygame.Rect(content_left, top_pad, content_w, sc(70))
+        hint_w = sc(220)
+        hint_h = sc(64)
+        self.hint_button = pygame.Rect(
+            content_right - hint_w,
+            top_pad,
+            hint_w,
+            hint_h,
+        )
         self.prompt_area = pygame.Rect(
             content_left,
             self.title_area.bottom + sc(15),
@@ -448,6 +460,9 @@ class StoryGame:
         self.screen = screen
         self.ui     = ui
         self.clock  = pygame.time.Clock()
+        self.hint_engine = HintEngine()
+        self.hint_results: "queue.Queue[tuple[int, str]]" = queue.Queue()
+        self.hint_button = Button(ui.hint_button, "Подсказка", bg=PURPLE, text_color=CREAM)
 
         # NEW: use filtered generator instead of generate_round
         self.rounds = [
@@ -470,17 +485,25 @@ class StoryGame:
         self.raw_image = None
 
         self.audio = AudioBank()
+        self.round_serial = 0
+        self.round_wrong_answers = []
+        self.hint_text = ""
+        self.hint_loading = False
         self.load_round(0)
 
     def load_round(self, idx):
         self.index = idx
         rd = self.rounds[self.index]
+        self.round_serial += 1
 
         self.locked               = False
         self.pending_feedback_audio = None
         self.feedback_time_ms     = 0
         self.advance_time_ms      = 0
         self.round_attempt_number = 0
+        self.round_wrong_answers  = []
+        self.hint_text            = ""
+        self.hint_loading         = False
 
         self.buttons = []
         for rect, label in zip(self.ui.button_rects, rd["options"]):
@@ -490,10 +513,14 @@ class StoryGame:
         self.audio.play_sequence(question_clips(rd))
 
     def speak_question(self):
+        if self.hint_engine.is_speaking():
+            return
         rd = self.rounds[self.index]
         self.audio.play_sequence(question_clips(rd))
 
     def speak_option(self, label):
+        if self.hint_engine.is_speaking():
+            return
         fn = wav_for_word(label)
         if not fn:
             print("[WARN] No wav for option:", label)
@@ -523,7 +550,93 @@ class StoryGame:
             b.text_color = getattr(old_btn, 'text_color', BLACK)
             new_buttons.append(b)
         self.buttons = new_buttons
+        self.hint_button.rect = self.ui.hint_button
         self.rescale_current_image()
+
+    def stop_audio(self):
+        self.audio.queue = []
+        self.audio.ch.stop()
+        pygame.mixer.music.stop()
+
+    def _hint_round_snapshot(self):
+        rd = dict(self.rounds[self.index])
+        rd["options"] = list(rd.get("options", []))
+        return rd
+
+    def request_hint(self):
+        if self.locked or self.hint_loading:
+            return
+
+        self.stop_audio()
+
+        if self.hint_text:
+            if not self.hint_engine.is_speaking():
+                self.hint_engine.speak(self.hint_text)
+            return
+
+        self.hint_loading = True
+        round_serial = self.round_serial
+        round_data = self._hint_round_snapshot()
+        attempt_number = self.round_attempt_number
+        wrong_answers = list(self.round_wrong_answers)
+
+        threading.Thread(
+            target=self._hint_worker,
+            args=(round_serial, round_data, attempt_number, wrong_answers),
+            daemon=True,
+        ).start()
+
+    def _hint_worker(self, round_serial, round_data, attempt_number, wrong_answers):
+        hint_text = self.hint_engine.generate_hint(
+            round_data,
+            attempt_number=attempt_number,
+            wrong_answers=wrong_answers,
+        )
+        self.hint_results.put((round_serial, hint_text))
+
+    def _poll_hint_results(self):
+        while True:
+            try:
+                round_serial, hint_text = self.hint_results.get_nowait()
+            except queue.Empty:
+                break
+
+            if round_serial != self.round_serial:
+                continue
+
+            self.hint_loading = False
+            self.hint_text = hint_text
+            self.stop_audio()
+            self.hint_engine.speak(hint_text)
+
+    def draw_hint_card(self):
+        if not self.hint_loading and not self.hint_text:
+            return
+
+        body = "Думаю над подсказкой..." if self.hint_loading else self.hint_text
+        pad = max(8, int(16 * self.ui.s))
+        title_gap = max(6, int(8 * self.ui.s))
+        card_h = max(int(128 * self.ui.s), self.ui.font_small.get_height() + self.ui.font_hint.get_height() * 3 + pad * 2)
+        card_rect = pygame.Rect(
+            self.ui.image_area.x + pad,
+            self.ui.image_area.bottom - card_h - pad,
+            self.ui.image_area.w - pad * 2,
+            card_h,
+        )
+
+        pygame.draw.rect(self.screen, SHADOW_FILL, card_rect.move(3, 4), border_radius=14)
+        pygame.draw.rect(self.screen, WHITE, card_rect, border_radius=14)
+        pygame.draw.rect(self.screen, DARK, card_rect, 3, border_radius=14)
+
+        title = self.ui.font_small.render("Подсказка", True, PURPLE)
+        self.screen.blit(title, (card_rect.x + pad, card_rect.y + pad))
+
+        lines = wrap_text(body, self.ui.font_hint, card_rect.w - pad * 2)
+        y = card_rect.y + pad + title.get_height() + title_gap
+        for line in lines[:3]:
+            txt = self.ui.font_hint.render(line, True, BLACK)
+            self.screen.blit(txt, (card_rect.x + pad, y))
+            y += txt.get_height() + max(2, int(4 * self.ui.s))
 
     def draw_progress(self):
         total = len(self.rounds)
@@ -543,6 +656,16 @@ class StoryGame:
 
         title = self.ui.font_title.render("Game 2", True, BLACK)
         self.screen.blit(title, (self.ui.title_area.x, self.ui.title_area.y))
+        self.hint_button.label = "Думаю..." if self.hint_loading else "Подсказка"
+        self.hint_button.bg = LIGHT_P if (self.hint_loading or self.locked) else PURPLE
+        self.hint_button.text_color = BLACK if (self.hint_loading or self.locked) else CREAM
+        self.hint_button.draw(
+            self.screen,
+            self.ui.font_small,
+            self.ui.border_w,
+            self.ui.s,
+            replay_icon_surf=None,
+        )
 
         pygame.draw.rect(self.screen, SHADOW_FILL, self.ui.prompt_area.move(3, 4), border_radius=14)
         pygame.draw.rect(self.screen, LAVENDER, self.ui.prompt_area, border_radius=14)
@@ -589,6 +712,7 @@ class StoryGame:
                 replay_icon_surf=self.ui.btn_replay_icon,
             )
 
+        self.draw_hint_card()
         self.draw_progress()
 
     def on_choice(self, label, now_ms):
@@ -628,10 +752,17 @@ class StoryGame:
             self.score += 1
             self.advance_time_ms = self.feedback_time_ms + CORRECT_NEXT_DELAY_MS
         else:
+            self.round_wrong_answers.append(label)
             self.advance_time_ms = 0
 
     def update_timers(self, now_ms):
         if self.pending_feedback_audio and now_ms >= self.feedback_time_ms:
+            if self.hint_engine.is_speaking():
+                delay_ms = 120
+                self.feedback_time_ms = now_ms + delay_ms
+                if self.advance_time_ms:
+                    self.advance_time_ms += delay_ms
+                return None
             play_audio(self.pending_feedback_audio)
             self.pending_feedback_audio = None
             if self.advance_time_ms == 0:
@@ -644,10 +775,14 @@ class StoryGame:
                 return "finished"
         return None
 
+    def shutdown(self):
+        self.hint_engine.stop()
+
     def run(self):
         while True:
             now_ms = pygame.time.get_ticks()
             self.audio.update()
+            self._poll_hint_results()
 
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
@@ -666,6 +801,10 @@ class StoryGame:
                         pass
 
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    if self.hint_button.hit(event.pos):
+                        self.request_hint()
+                        continue
+
                     if self.ui.prompt_replay.collidepoint(event.pos):
                         self.speak_question()
                         continue
@@ -751,7 +890,11 @@ def main():
 
         if action == "play":
             game = StoryGame(screen, ui)
-            res  = game.run()
+            res = "quit"
+            try:
+                res = game.run()
+            finally:
+                game.shutdown()
 
             if res == "quit":
                 break
