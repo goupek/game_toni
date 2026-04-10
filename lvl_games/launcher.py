@@ -20,6 +20,8 @@ _HERE  = Path(__file__).resolve().parent
 _ROOT  = _HERE.parent
 PYTHON = sys.executable
 PROFILE_FILE = _HERE / "player_profile.json"
+BOXY_PIPELINE = _ROOT / "pipeline_mem" / "g4-e2b-boxy_streaming.py"
+BOXY_SILERO_MODEL = _ROOT / "models" / "silero" / "v5_ru.pt"
 
 CMD: dict[str, list[str]] = {
     "level_test":   [PYTHON, str(_HERE / "lvl_game_connected.py")],
@@ -83,7 +85,26 @@ def _make_env() -> dict:
 
 
 def _wrap(text: str, font: pygame.font.Font, max_w: int) -> list[str]:
-    words, lines, line = text.split(), [], ""
+    def _split_long_word(word: str) -> list[str]:
+        if max_w <= 0 or font.size(word)[0] <= max_w:
+            return [word]
+        parts: list[str] = []
+        part = ""
+        for ch in word:
+            cand = part + ch
+            if part and font.size(cand)[0] > max_w:
+                parts.append(part)
+                part = ch
+            else:
+                part = cand
+        if part:
+            parts.append(part)
+        return parts or [word]
+
+    words: list[str] = []
+    for word in text.split():
+        words.extend(_split_long_word(word))
+    lines, line = [], ""
     for word in words:
         cand = (line + " " + word).strip()
         if font.size(cand)[0] <= max_w:
@@ -346,6 +367,55 @@ def center_text(surf: pygame.Surface, text: str, font: pygame.font.Font,
     surf.blit(lbl, lbl.get_rect(center=(cx, cy)))
 
 
+def _draw_text_in_rect(
+    surf: pygame.Surface,
+    text: str,
+    rect: pygame.Rect,
+    color: tuple,
+    size: int,
+    *,
+    bold: bool = False,
+    min_size: int = 12,
+    line_gap: int = 0,
+    align: str = "center",
+    v_align: str = "center",
+):
+    chosen_font = _best_font(max(min_size, size), bold=bold)
+    chosen_lines = [text]
+    paragraphs = text.splitlines() or [text]
+
+    for cur_size in range(max(min_size, size), min_size - 1, -1):
+        font = _best_font(cur_size, bold=bold)
+        lines: list[str] = []
+        for paragraph in paragraphs:
+            wrapped = _wrap(paragraph, font, rect.w)
+            lines.extend(wrapped or [""])
+        total_h = len(lines) * font.get_linesize() + max(0, len(lines) - 1) * line_gap
+        if total_h <= rect.h and all(font.size(line)[0] <= rect.w for line in lines):
+            chosen_font = font
+            chosen_lines = lines
+            break
+        chosen_font = font
+        chosen_lines = lines
+
+    total_h = len(chosen_lines) * chosen_font.get_linesize() + max(0, len(chosen_lines) - 1) * line_gap
+    if v_align == "top":
+        y = rect.y
+    else:
+        y = rect.centery - total_h // 2
+
+    for line in chosen_lines:
+        lbl = chosen_font.render(line, True, color)
+        if align == "left":
+            x = rect.x
+        elif align == "right":
+            x = rect.right - lbl.get_width()
+        else:
+            x = rect.centerx - lbl.get_width() // 2
+        surf.blit(lbl, (x, y))
+        y += chosen_font.get_linesize() + line_gap
+
+
 # ── Launcher ───────────────────────────────────────────────────────────────────
 
 class Launcher:
@@ -360,18 +430,88 @@ class Launcher:
         self.profile = load_profile()
         self.state = "home"
         self.proc: subprocess.Popen | None = None
+        self.chat_proc: subprocess.Popen | None = None
         self._env = _make_env()
         self._tick = 0
         self._hover: str | None = None
         self._press: str | None = None  # for pressed state (sink)
         self._pending_click: tuple[int, int] | None = None  # resolve _press when we have rects
         self._bar = 0.0  # progress bar animated (600ms ease-out target)
+        self._chat_return_state = "home"
+        self._chat_status = "Запусти Boxy и скажи «Привет бокс», чтобы начать разговор."
 
     def _scale(self) -> float:
         w, h = self.screen.get_size()
         return min(w / DW, h / DH)
 
+    def _is_chat_running(self) -> bool:
+        return self.chat_proc is not None and self.chat_proc.poll() is None
+
+    def _open_chat(self):
+        if self.state in {"home", "a1_hub", "a2_hub"}:
+            self._chat_return_state = self.state
+        self.state = "chat"
+
+    def _launch_chat(self):
+        if self._is_chat_running():
+            self._chat_status = "Boxy уже запущен. Скажи «Привет бокс», чтобы его разбудить."
+            return
+
+        if not BOXY_PIPELINE.exists():
+            self._chat_status = f"Не найден ассистент: {BOXY_PIPELINE.name}"
+            return
+
+        if not BOXY_SILERO_MODEL.exists():
+            self._chat_status = f"Не найдена модель TTS: {BOXY_SILERO_MODEL.name}"
+            return
+
+        env = self._env.copy()
+        env["PYTHONUNBUFFERED"] = "1"
+
+        self.chat_proc = subprocess.Popen(
+            [PYTHON, str(BOXY_PIPELINE)],
+            cwd=str(_ROOT),
+            env=env,
+        )
+        self._chat_status = "Boxy запущен. Нужен микрофон и llama.cpp server на localhost:8080."
+
+    def _stop_chat(self, announce: bool = True):
+        if self.chat_proc is None:
+            if announce:
+                self._chat_status = "Boxy уже остановлен."
+            return
+
+        proc = self.chat_proc
+        self.chat_proc = None
+        try:
+            if proc.poll() is None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=1.5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait(timeout=1.5)
+            if announce:
+                self._chat_status = "Голосовой помощник остановлен."
+        except Exception:
+            if announce:
+                self._chat_status = "Не удалось аккуратно остановить Boxy."
+
+    def _poll_chat(self):
+        if self.chat_proc is None:
+            return
+        rc = self.chat_proc.poll()
+        if rc is None:
+            return
+        self.chat_proc = None
+        if rc == 0:
+            self._chat_status = "Boxy завершил работу."
+        else:
+            self._chat_status = f"Boxy завершился с кодом {rc}."
+
     def _launch(self, key: str):
+        if self._is_chat_running():
+            self._stop_chat(announce=False)
         self.proc = subprocess.Popen(CMD[key], cwd=str(_ROOT), env=self._env)
         self.state = "waiting" if key == "level_test" else "launching"
 
@@ -501,14 +641,24 @@ class Launcher:
             icon_cx = go_rect.x + _sc(68, s)
             icon_cy = go_rect.centery
             _draw_play_icon(surf, icon_cx, icon_cy, _sc(26, s), 0.3, CREAM)
-            f_play = _best_font(_sc(34, s), bold=True)
-            lbl = f_play.render(f"Play Level {level} Games", True, CREAM)
-            surf.blit(lbl, (go_rect.x + _sc(120, s), go_rect.centery - lbl.get_height() // 2))
+            _draw_text_in_rect(
+                surf,
+                f"Play Level {level} Games",
+                pygame.Rect(go_rect.x + _sc(112, s), go_rect.y + _sc(10, s), go_rect.w - _sc(136, s), go_rect.h - _sc(20, s)),
+                CREAM,
+                _sc(34, s),
+                bold=True,
+                min_size=_sc(20, s),
+                align="left",
+            )
             btns["go"] = go_rect
 
-            # ── Retake: 420×72, radius 28, LIGHT_P, border PURPLE 35% ──────────
-            ret_w, ret_h = _sc(420, s), _sc(72, s)
-            ret_rect = pygame.Rect((w - ret_w) // 2, go_rect.bottom + gap_22, ret_w, ret_h)
+            # ── Retake + chat: 320×72 buttons, radius 28 ────────────────────────
+            ret_w, ret_h = _sc(320, s), _sc(72, s)
+            btn_gap = _sc(18, s)
+            row_w = ret_w * 2 + btn_gap
+            row_x = (w - row_w) // 2
+            ret_rect = pygame.Rect(row_x, go_rect.bottom + gap_22, ret_w, ret_h)
             pygame.draw.rect(surf, LIGHT_P, ret_rect, border_radius=_sc(28, s))
             border_color = (
                 int(PURPLE[0] * 0.35 + LIGHT_P[0] * 0.65),
@@ -517,9 +667,31 @@ class Launcher:
             )
             pygame.draw.rect(surf, border_color, ret_rect, 3, border_radius=_sc(28, s))
             _draw_refresh_icon(surf, ret_rect.x + _sc(44, s), ret_rect.centery, _sc(14, s))
-            center_text(surf, "Retake Level Test", _best_font(_sc(24, s), bold=True),
-                        TEXT_DARK, ret_rect.centerx + _sc(12, s), ret_rect.centery)
+            _draw_text_in_rect(
+                surf,
+                "Retake Test",
+                pygame.Rect(ret_rect.x + _sc(74, s), ret_rect.y + _sc(10, s), ret_rect.w - _sc(92, s), ret_rect.h - _sc(20, s)),
+                TEXT_DARK,
+                _sc(24, s),
+                bold=True,
+                min_size=_sc(16, s),
+                align="left",
+            )
             btns["retake_home"] = ret_rect
+
+            chat_rect = pygame.Rect(ret_rect.right + btn_gap, ret_rect.y, ret_w, ret_h)
+            pygame.draw.rect(surf, CREAM if self._is_chat_running() else LIGHT_P, chat_rect, border_radius=_sc(28, s))
+            pygame.draw.rect(surf, PURPLE, chat_rect, 3, border_radius=_sc(28, s))
+            _draw_text_in_rect(
+                surf,
+                "Boxy Running" if self._is_chat_running() else "Chat with Boxy",
+                pygame.Rect(chat_rect.x + _sc(16, s), chat_rect.y + _sc(10, s), chat_rect.w - _sc(32, s), chat_rect.h - _sc(20, s)),
+                TEXT_DARK,
+                _sc(24, s),
+                bold=True,
+                min_size=_sc(16, s),
+            )
+            btns["chat_home"] = chat_rect
 
         else:
             # First visit: card + Start Level Test button (same style as Play)
@@ -535,9 +707,32 @@ class Launcher:
             _draw_soft_shadow(surf, st_rect, _sc(36, s), alpha=0.25)
             pygame.draw.rect(surf, PURPLE, st_rect, border_radius=_sc(36, s))
             _draw_play_icon(surf, st_rect.x + _sc(68, s), st_rect.centery, _sc(26, s), 0.3, CREAM)
-            center_text(surf, "Start Level Test", _best_font(_sc(34, s), bold=True),
-                        CREAM, st_rect.centerx + _sc(20, s), st_rect.centery)
+            _draw_text_in_rect(
+                surf,
+                "Start Level Test",
+                pygame.Rect(st_rect.x + _sc(112, s), st_rect.y + _sc(10, s), st_rect.w - _sc(136, s), st_rect.h - _sc(20, s)),
+                CREAM,
+                _sc(34, s),
+                bold=True,
+                min_size=_sc(20, s),
+                align="left",
+            )
             btns["start"] = st_rect
+
+            chat_w, chat_h = _sc(420, s), _sc(72, s)
+            chat_rect = pygame.Rect((w - chat_w) // 2, st_rect.bottom + gap_22, chat_w, chat_h)
+            pygame.draw.rect(surf, LIGHT_P, chat_rect, border_radius=_sc(28, s))
+            pygame.draw.rect(surf, PURPLE, chat_rect, 3, border_radius=_sc(28, s))
+            _draw_text_in_rect(
+                surf,
+                "Chat with Boxy",
+                pygame.Rect(chat_rect.x + _sc(16, s), chat_rect.y + _sc(10, s), chat_rect.w - _sc(32, s), chat_rect.h - _sc(20, s)),
+                TEXT_DARK,
+                _sc(24, s),
+                bold=True,
+                min_size=_sc(16, s),
+            )
+            btns["chat_home"] = chat_rect
 
         # ── Exit: 160×64, radius 22, LAVENDER, 28px margin, door icon ───────────
         exit_margin = _sc(28, s)
@@ -607,13 +802,206 @@ class Launcher:
         bar_y = cy + ch + _sc(16, s)
         hb = pygame.Rect(_sc(28, s), bar_y, _sc(120, s), _sc(52, s))
         pygame.draw.rect(surf, LAVENDER, hb, border_radius=_sc(22, s))
-        center_text(surf, "Home", _best_font(_sc(20, s), bold=True), TEXT_DARK, hb.centerx, hb.centery)
+        _draw_text_in_rect(
+            surf,
+            "Home",
+            pygame.Rect(hb.x + _sc(10, s), hb.y + _sc(8, s), hb.w - _sc(20, s), hb.h - _sc(16, s)),
+            TEXT_DARK,
+            _sc(20, s),
+            bold=True,
+            min_size=_sc(14, s),
+        )
         btns["hub_home"] = hb
+        cb = pygame.Rect((w - _sc(240, s)) // 2, bar_y, _sc(240, s), _sc(52, s))
+        pygame.draw.rect(surf, CREAM if self._is_chat_running() else LIGHT_P, cb, border_radius=_sc(22, s))
+        pygame.draw.rect(surf, PURPLE, cb, 2, border_radius=_sc(22, s))
+        _draw_text_in_rect(
+            surf,
+            "Boxy Running" if self._is_chat_running() else "Boxy Chat",
+            pygame.Rect(cb.x + _sc(10, s), cb.y + _sc(7, s), cb.w - _sc(20, s), cb.h - _sc(14, s)),
+            TEXT_DARK,
+            _sc(18, s),
+            bold=True,
+            min_size=_sc(12, s),
+        )
+        btns["chat_hub"] = cb
         rb = pygame.Rect(w - _sc(220, s) - _sc(28, s), bar_y, _sc(220, s), _sc(52, s))
         pygame.draw.rect(surf, LIGHT_P, rb, border_radius=_sc(22, s))
         pygame.draw.rect(surf, PURPLE, rb, 2, border_radius=_sc(22, s))
-        center_text(surf, "Retake Level Test", _best_font(_sc(18, s), bold=True), TEXT_DARK, rb.centerx, rb.centery)
+        _draw_text_in_rect(
+            surf,
+            "Retake Level Test",
+            pygame.Rect(rb.x + _sc(10, s), rb.y + _sc(7, s), rb.w - _sc(20, s), rb.h - _sc(14, s)),
+            TEXT_DARK,
+            _sc(18, s),
+            bold=True,
+            min_size=_sc(12, s),
+        )
         btns["retake_hub"] = rb
+        if self._pending_click is not None:
+            for key, r in btns.items():
+                if r.collidepoint(self._pending_click):
+                    self._press = key
+                    break
+            self._pending_click = None
+        return btns
+
+    def draw_chat(self) -> dict[str, pygame.Rect]:
+        surf = self.screen
+        w, h = surf.get_size()
+        s = self._scale()
+        surf.fill(CREAM)
+
+        for idx, (bx, by, bw, bh) in enumerate([
+            (0, 0, _sc(300, s), _sc(240, s)),
+            (w - _sc(280, s), 0, _sc(280, s), _sc(240, s)),
+            (_sc(40, s), h - _sc(180, s), _sc(260, s), _sc(160, s)),
+            (w - _sc(320, s), h - _sc(220, s), _sc(300, s), _sc(180, s)),
+        ]):
+            _draw_rounded_rect_alpha(surf, pygame.Rect(bx, by, bw, bh),
+                                     [LIGHT_P, LAVENDER][idx % 2], _sc(70, s), 0.12)
+
+        margin = _sc(24, s)
+        hdr_rect = pygame.Rect(margin, margin, w - 2 * margin, _sc(132, s))
+        _draw_soft_shadow(surf, hdr_rect, _sc(24, s), alpha=0.2, y_offset=6)
+        _draw_gradient_rect(surf, hdr_rect, PURPLE, PINK, radius=_sc(24, s))
+        _draw_text_in_rect(
+            surf,
+            "Boxy Voice Chat",
+            pygame.Rect(hdr_rect.x + _sc(24, s), hdr_rect.y + _sc(12, s), hdr_rect.w - _sc(48, s), _sc(52, s)),
+            CREAM,
+            _sc(44, s),
+            bold=True,
+            min_size=_sc(24, s),
+        )
+        _draw_text_in_rect(
+            surf,
+            "STT + LLM + TTS assistant",
+            pygame.Rect(hdr_rect.x + _sc(24, s), hdr_rect.y + _sc(64, s), hdr_rect.w - _sc(48, s), _sc(34, s)),
+            _alpha(CREAM, 0.92),
+            _sc(20, s),
+            bold=True,
+            min_size=_sc(12, s),
+        )
+
+        card = pygame.Rect((w - _sc(900, s)) // 2, hdr_rect.bottom + _sc(28, s), _sc(900, s), _sc(360, s))
+        _draw_soft_shadow(surf, card, _sc(30, s), alpha=0.22, y_offset=8)
+        pygame.draw.rect(surf, LAVENDER, card, border_radius=_sc(32, s))
+
+        pad = _sc(34, s)
+        _draw_text_in_rect(
+            surf,
+            "How to use Boxy",
+            pygame.Rect(card.x + pad, card.y + _sc(18, s), card.w - 2 * pad, _sc(40, s)),
+            TEXT_DARK,
+            _sc(28, s),
+            bold=True,
+            min_size=_sc(18, s),
+        )
+
+        status_rect = pygame.Rect(card.x + pad, card.y + _sc(78, s), card.w - 2 * pad, _sc(56, s))
+        pygame.draw.rect(
+            surf,
+            PURPLE if self._is_chat_running() else CREAM,
+            status_rect,
+            border_radius=_sc(24, s),
+        )
+        pygame.draw.rect(surf, PURPLE, status_rect, 2, border_radius=_sc(24, s))
+        _draw_text_in_rect(
+            surf,
+            "Status: running" if self._is_chat_running() else "Status: stopped",
+            pygame.Rect(status_rect.x + _sc(16, s), status_rect.y + _sc(8, s), status_rect.w - _sc(32, s), status_rect.h - _sc(16, s)),
+            CREAM if self._is_chat_running() else TEXT_DARK,
+            _sc(22, s),
+            bold=True,
+            min_size=_sc(14, s),
+        )
+
+        guide_rect = pygame.Rect(card.x + pad, status_rect.bottom + _sc(22, s), card.w - 2 * pad, _sc(118, s))
+        _draw_text_in_rect(
+            surf,
+            "1. Start Boxy from this screen. 2. Say «Привет бокс» to wake the assistant. "
+            "3. Speak naturally in English or Russian and listen for the spoken reply. "
+            "4. Say «Пока» or press Stop before starting another game.",
+            guide_rect,
+            TEXT_DARK_80,
+            _sc(20, s),
+            min_size=_sc(13, s),
+            line_gap=_sc(4, s),
+            v_align="top",
+        )
+
+        note = "Needs microphone access, speakers, and a llama.cpp server at localhost:8080."
+        _draw_text_in_rect(
+            surf,
+            note,
+            pygame.Rect(card.x + pad, card.bottom - _sc(64, s), card.w - 2 * pad, _sc(44, s)),
+            TEXT_DARK_80,
+            _sc(18, s),
+            min_size=_sc(12, s),
+            line_gap=_sc(2, s),
+        )
+
+        btns: dict[str, pygame.Rect] = {}
+        btn_w, btn_h = _sc(280, s), _sc(72, s)
+        gap = _sc(22, s)
+        row_w = btn_w * 2 + gap
+        row_x = (w - row_w) // 2
+        row_y = card.bottom + _sc(24, s)
+
+        start_rect = pygame.Rect(row_x, row_y, btn_w, btn_h)
+        pygame.draw.rect(surf, PURPLE, start_rect, border_radius=_sc(28, s))
+        _draw_text_in_rect(
+            surf,
+            "Start Boxy",
+            pygame.Rect(start_rect.x + _sc(16, s), start_rect.y + _sc(10, s), start_rect.w - _sc(32, s), start_rect.h - _sc(20, s)),
+            CREAM,
+            _sc(26, s),
+            bold=True,
+            min_size=_sc(16, s),
+        )
+        btns["chat_start"] = start_rect
+
+        stop_rect = pygame.Rect(start_rect.right + gap, row_y, btn_w, btn_h)
+        pygame.draw.rect(surf, LIGHT_P, stop_rect, border_radius=_sc(28, s))
+        pygame.draw.rect(surf, PURPLE, stop_rect, 3, border_radius=_sc(28, s))
+        _draw_text_in_rect(
+            surf,
+            "Stop Boxy",
+            pygame.Rect(stop_rect.x + _sc(16, s), stop_rect.y + _sc(10, s), stop_rect.w - _sc(32, s), stop_rect.h - _sc(20, s)),
+            TEXT_DARK,
+            _sc(26, s),
+            bold=True,
+            min_size=_sc(16, s),
+        )
+        btns["chat_stop"] = stop_rect
+
+        back_rect = pygame.Rect(_sc(28, s), h - _sc(80, s), _sc(160, s), _sc(52, s))
+        pygame.draw.rect(surf, LAVENDER, back_rect, border_radius=_sc(22, s))
+        _draw_text_in_rect(
+            surf,
+            "Back",
+            pygame.Rect(back_rect.x + _sc(10, s), back_rect.y + _sc(7, s), back_rect.w - _sc(20, s), back_rect.h - _sc(14, s)),
+            TEXT_DARK,
+            _sc(20, s),
+            bold=True,
+            min_size=_sc(14, s),
+        )
+        btns["chat_back"] = back_rect
+
+        status_box = pygame.Rect(w - _sc(500, s) - _sc(28, s), h - _sc(96, s), _sc(500, s), _sc(68, s))
+        pygame.draw.rect(surf, CREAM, status_box, border_radius=_sc(24, s))
+        pygame.draw.rect(surf, PURPLE, status_box, 2, border_radius=_sc(24, s))
+        _draw_text_in_rect(
+            surf,
+            self._chat_status,
+            pygame.Rect(status_box.x + _sc(14, s), status_box.y + _sc(10, s), status_box.w - _sc(28, s), status_box.h - _sc(20, s)),
+            TEXT_DARK_80,
+            _sc(17, s),
+            min_size=_sc(11, s),
+            line_gap=_sc(2, s),
+        )
+
         if self._pending_click is not None:
             for key, r in btns.items():
                 if r.collidepoint(self._pending_click):
@@ -650,11 +1038,14 @@ class Launcher:
             events = pygame.event.get()
             clicks = []
             mouse_pos = pygame.mouse.get_pos()
+            self._poll_chat()
 
             for ev in events:
                 if ev.type == pygame.QUIT:
                     if self.proc:
                         self.proc.terminate()
+                    if self._is_chat_running():
+                        self._stop_chat(announce=False)
                     pygame.quit()
                     sys.exit()
                 if ev.type == pygame.VIDEORESIZE:
@@ -670,6 +1061,8 @@ class Launcher:
                 btns = self.draw_home()
             elif self.state in ("a1_hub", "a2_hub"):
                 btns = self.draw_hub("A1" if self.state == "a1_hub" else "A2")
+            elif self.state == "chat":
+                btns = self.draw_chat()
             elif self.state == "waiting":
                 self.draw_waiting()
                 self._poll()
@@ -694,12 +1087,22 @@ class Launcher:
 
     def _on_click(self, key: str):
         if key == "exit":
+            if self._is_chat_running():
+                self._stop_chat(announce=False)
             pygame.quit()
             sys.exit()
         elif key == "start":
             self._launch("level_test")
         elif key == "go":
             self.state = f"{(self.profile or {}).get('level', 'A1').lower()}_hub"
+        elif key in ("chat_home", "chat_hub"):
+            self._open_chat()
+        elif key == "chat_start":
+            self._launch_chat()
+        elif key == "chat_stop":
+            self._stop_chat()
+        elif key == "chat_back":
+            self.state = self._chat_return_state
         elif key in ("retake_home", "retake_hub"):
             self._launch("level_test")
         elif key == "hub_home":
