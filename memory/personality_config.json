@@ -1,0 +1,13 @@
+{
+  "profile": {
+    "humor": 20,
+    "honesty": 95,
+    "helpfulness": 90,
+    "sass": 10,
+    "curiosity": 60
+  },
+  "mood_modifiers": {
+    "energy": 100,
+    "stress": 0
+  }
+}

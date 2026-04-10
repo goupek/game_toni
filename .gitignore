@@ -1,1 +1,16 @@
-venv
+venv/
+.venv/
+.env
+
+models/
+Qwen3-TTS-0.6B-CustomVoice/
+
+__pycache__/
+*.pyc
+
+*.wav
+*.mp3
+
+.audios
+.piper
+.codex
