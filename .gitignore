@@ -5,6 +5,9 @@ venv/
 models/
 Qwen3-TTS-0.6B-CustomVoice/
 
+database/app.db
+database/__pycache__/
+
 __pycache__/
 *.pyc
 
@@ -14,3 +17,5 @@ __pycache__/
 .audios
 .piper
 .codex
+.vscode/
+validate_enabled_words.py

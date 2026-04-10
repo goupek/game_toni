@@ -1,62 +1,35 @@
 import random
+from database.db_queries import get_game2_vocab_by_manifest
 
-# -----------------------------
-# NOUNS - singular, plural, genitive plural (множественный родительный), gender
-# -----------------------------
-
-NOUNS = {
-    "dog":  {"sg": "собака", "pl": "собаки", "gen_pl": "собак",  "gender": "f"},
-    "cat":  {"sg": "кошка",  "pl": "кошки",  "gen_pl": "кошек",  "gender": "f"},
-    "car":  {"sg": "машина", "pl": "машины", "gen_pl": "машин",  "gender": "f"},
-    "ball": {"sg": "мяч",    "pl": "мячи",   "gen_pl": "мячей",  "gender": "m"},
+# Keep this as the game-side subset filter tied to available assets.
+# DB can contain more vocabulary; gameplay should only use this subset.
+ENABLED_WORDS = {
+    "nouns": {"dog", "cat", "car", "ball"},
+    "adjectives": {
+        "red", "blue", "light blue", "green", "white",
+        "yellow", "purple", "pink", "gray", "brown",
+    },
+    "numbers": {1, 2, 3, 4, 5},
 }
 
-# -----------------------------
-# ADJECTIVES masculine, feminine, neuter, plural
-# -----------------------------
+# Load vocabulary from DB (with graceful fallback to base forms if forms missing)
+_db_vocab = get_game2_vocab_by_manifest(ENABLED_WORDS)
+NOUNS = _db_vocab["nouns"]
+ADJECTIVES = _db_vocab["adjectives"]
+NUM_WORD = _db_vocab["numbers"]
 
-ADJECTIVES = {
-    "red":     {"m": "красный",     "f": "красная",     "n": "красное",     "pl": "красные"},
-    "blue":    {"m": "синий",       "f": "синяя",       "n": "синее",       "pl": "синие"},
-    "light_blue": {"m": "голубой",  "f": "голубая",     "n": "голубое",     "pl": "голубые"},
-    "green":   {"m": "зелёный",     "f": "зелёная",     "n": "зелёное",     "pl": "зелёные"},
-#    "black":   {"m": "чёрный",      "f": "чёрная",      "n": "чёрное",      "pl": "чёрные"},
-    "white":   {"m": "белый",       "f": "белая",       "n": "белое",       "pl": "белые"},
-    "yellow":  {"m": "жёлтый",      "f": "жёлтая",      "n": "жёлтое",      "pl": "жёлтые"},
-    "purple":  {"m": "фиолетовый",  "f": "фиолетовая",  "n": "фиолетовое",  "pl": "фиолетовые"},
-    "pink":    {"m": "розовый",     "f": "розовая",     "n": "розовое",     "pl": "розовые"},
-    "grey":    {"m": "серый",       "f": "серая",       "n": "серое",       "pl": "серые"},
-    "brown":   {"m": "коричневый",  "f": "коричневая",  "n": "коричневое",  "pl": "коричневые"},
-}
-
-# -----------------------------
-# COLOR RGB
-# -----------------------------
-
+# COLOR RGB (not in DB, kept as hardcoded mapping)
 COLOR_RGB = {
     "red":        (235, 60, 60),
     "blue":       (70, 130, 240),
-    "light_blue": (135, 206, 250),
+    "light blue": (135, 206, 250),
     "green":      (40, 190, 90),
-#    "black":      (20, 20, 20),
     "white":      (240, 240, 240),
     "yellow":     (250, 220, 60),
     "purple":     (150, 80, 200),
     "pink":       (255, 140, 200),
-    "grey":       (150, 150, 150),
+    "gray":       (150, 150, 150),
     "brown":      (150, 100, 60),
-}
-
-# -----------------------------
-# NUMBERS
-# -----------------------------
-
-NUM_WORD = {
-    1: {"m": "один", "f": "одна", "n": "одно"},
-    2: {"m": "два",  "f": "две",  "n": "два"},
-    3: "три",
-    4: "четыре",
-    5: "пять",
 }
 
 # -----------------------------
@@ -88,23 +61,51 @@ def number_form(n, noun_key):
         return val[gender]
     return val
 
+
+def get_enabled_words():
+    """Return a copy of the enabled gameplay subset manifest."""
+    return {
+        "nouns": set(ENABLED_WORDS["nouns"]),
+        "adjectives": set(ENABLED_WORDS["adjectives"]),
+        "numbers": set(ENABLED_WORDS["numbers"]),
+    }
+
+
+def _enabled_noun_keys():
+    keys = [k for k in NOUNS.keys() if k in ENABLED_WORDS["nouns"]]
+    return keys or list(NOUNS.keys())
+
+
+def _enabled_adjective_keys():
+    keys = [k for k in ADJECTIVES.keys() if k in ENABLED_WORDS["adjectives"]]
+    return keys or list(ADJECTIVES.keys())
+
+
+def _enabled_number_values(max_count):
+    allowed = [n for n in range(1, max_count + 1) if n in ENABLED_WORDS["numbers"] and n in NUM_WORD]
+    return allowed or [n for n in range(1, max_count + 1) if n in NUM_WORD]
+
 # -----------------------------
 # ROUND GENERATOR
 # -----------------------------
 
 def generate_round(option_count=3, max_count=4):
 
+    noun_keys = _enabled_noun_keys()
+    adjective_keys = _enabled_adjective_keys()
+    number_values = _enabled_number_values(max_count)
+
     qtype = random.choice(["count", "color"]) # TODO: more later
-    noun_key = random.choice(list(NOUNS.keys()))
-    adj_key = random.choice(list(ADJECTIVES.keys()))
-    count = random.randint(1, max_count)
+    noun_key = random.choice(noun_keys)
+    adj_key = random.choice(adjective_keys)
+    count = random.choice(number_values)
     rgb = COLOR_RGB.get(adj_key)
     
     if qtype == "count":
         prompt = quantity_prompt(noun_key)
         correct = number_form(count, noun_key)
 
-        all_options = [number_form(n, noun_key) for n in range(1, max_count + 1)]
+        all_options = [number_form(n, noun_key) for n in number_values]
         options = random.sample(all_options, min(option_count, len(all_options)))
         if correct not in options:
             options[0] = correct
@@ -116,9 +117,9 @@ def generate_round(option_count=3, max_count=4):
 
         all_options = [
             adjective_form(k, noun_key, count)
-            for k in ADJECTIVES.keys()
+            for k in adjective_keys
         ]
-        options = random.sample(all_options, option_count)
+        options = random.sample(all_options, min(option_count, len(all_options)))
         if correct not in options:
             options[0] = correct
         random.shuffle(options)

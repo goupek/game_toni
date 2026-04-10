@@ -20,9 +20,8 @@ generate_round_filtered() behaves exactly like generate_round() except:
 
 Grammar handling
 ----------------
-Grammatical gender for nouns comes from GAME2_NOUNS["gender"] which mirrors
-question_generation.NOUNS[noun_key]["gender"].  Both must agree; if they
-ever diverge, question_generation.py is authoritative for the answer text
+Grammatical gender for nouns comes from question_generation.NOUNS[noun_key]["gender"].
+question_generation.py is authoritative for the answer text
 (adjective_form / number_form call it directly), and word_knowledge.py
 is used only for filtering decisions.
 """
@@ -46,38 +45,10 @@ from question_generation import (
     number_form,
 )
 from word_knowledge import (
-    GAME2_NOUNS,
-    ensure_game2_words_present,
     unknown_adj_keys,
     unknown_counts,
     noun_gender,
 )
-
-_bootstrapped = False
-
-
-def _bootstrap_once() -> None:
-    global _bootstrapped
-    if not _bootstrapped:
-        ensure_game2_words_present()
-        _bootstrapped = True
-
-
-# ── sanity-check: GAME2_NOUNS genders must match question_generation.NOUNS ──
-def _assert_gender_consistency() -> None:
-    """
-    Emit a warning (not an error) if GAME2_NOUNS gender disagrees with
-    question_generation.NOUNS.  Mismatch would mean game2 uses a different
-    noun form in answer text vs. what word_knowledge uses for filtering.
-    """
-    for noun_key, q_noun in NOUNS.items():
-        wk_gender = GAME2_NOUNS.get(noun_key, {}).get("gender")
-        q_gender  = q_noun.get("gender")
-        if wk_gender and q_gender and wk_gender != q_gender:
-            print(
-                f"[WARN] Gender mismatch for '{noun_key}': "
-                f"word_knowledge={wk_gender}, question_generation={q_gender}"
-            )
 
 
 # ── public API ────────────────────────────────────────────────────────────────
@@ -91,7 +62,6 @@ def generate_round_filtered(option_count: int = 3, max_count: int = 4) -> dict:
     ---------------
     qtype, noun_key, count, adj_key, rgb, prompt_text, options, correct
     """
-    _bootstrap_once()
 
     unk_adjs   = unknown_adj_keys()   # e.g. ["blue", "green", "brown", …]
     unk_counts = unknown_counts()     # e.g. [1, 2, 4]
@@ -111,8 +81,7 @@ def generate_round_filtered(option_count: int = 3, max_count: int = 4) -> dict:
     noun_key = random.choice(list(NOUNS.keys()))
 
     # Noun gender used for choosing the correct adjective/number form.
-    # question_generation.NOUNS is authoritative for answer generation;
-    # GAME2_NOUNS is kept in sync and used for any filtering logic.
+    # question_generation.NOUNS is authoritative for answer generation.
     gender = NOUNS[noun_key]["gender"]   # "m" | "f"  (game2 only has m/f nouns)
 
     if qtype == "count":

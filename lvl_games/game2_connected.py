@@ -1,11 +1,9 @@
 """
-game2 connected to the shared word-knowledge store.
+game2 connected to the SQLite word-knowledge store.
 
-Identical to game2.py with two changes:
-  1. generate_round() is replaced by generate_round_filtered() so that rounds
-     only use words the kid has NOT yet mastered (according to word_knowledge.json).
-  2. On startup, ensure_game2_words_present() is called to register any game2
-     vocabulary that isn't in word_knowledge.json yet.
+Identical to game2.py with one change:
+  generate_round() is replaced by generate_round_filtered() so that rounds
+  only use words the kid has NOT yet mastered (according to DB progress).
 
 Run directly:
     python lvl_games/game2_connected.py
@@ -13,8 +11,8 @@ Run directly:
 Workflow
 --------
 1. Run lvl_game_connected.py  → plays the level-identification game
-                               → saves word_knowledge.json
-2. Run game2_connected.py     → reads word_knowledge.json
+                               → saves results to the database
+2. Run game2_connected.py     → reads progress from the database
                                → skips words the kid already knows
 """
 
@@ -33,8 +31,9 @@ for p in [str(_HERE), str(_ROOT)]:
 import pygame
 
 from question_generation_filtered import generate_round_filtered   # NEW (replaces generate_round)
-from word_knowledge import ensure_game2_words_present              # NEW
+from question_generation import NOUNS, ADJECTIVES, NUM_WORD
 from image_utils import build_round_surface
+from word_knowledge import update_from_level_game, _NUM_EN_MAP
 
 # -----------------------------
 # SETTINGS  (unchanged)
@@ -98,87 +97,36 @@ def _best_font(size, bold=False):
 # -----------------------------
 # TTS AUDIO
 # -----------------------------
-TTS_FILES = {
-    "1_m.wav": "один",
-    "1_f.wav": "одна",
-    "1_n.wav": "одно",
-    "2_m.wav": "два",
-    "2_f.wav": "две",
-    "2_n.wav": "два",
-    "3.wav":   "три",
-    "4.wav":   "четыре",
-    "5.wav":   "пять",
+def _build_tts_files(nouns, adjectives, num_word):
+    result = {}
 
-    "dog_sg.wav":     "собака",
-    "dog_pl.wav":     "собаки",
-    "dog_gen_pl.wav": "собак",
+    for noun_key, forms in nouns.items():
+        for form_type, form_value in forms.items():
+            if form_type != "gender":
+                result[f"{noun_key}_{form_type}.wav"] = form_value
 
-    "cat_sg.wav":     "кошка",
-    "cat_pl.wav":     "кошки",
-    "cat_gen_pl.wav": "кошек",
+    for adj_key, forms in adjectives.items():
+        adj_filename = adj_key.replace(" ", "_")
+        for gender, form_value in forms.items():
+            result[f"{adj_filename}_{gender}.wav"] = form_value
 
-    "car_sg.wav":     "машина",
-    "car_pl.wav":     "машины",
-    "car_gen_pl.wav": "машин",
+    for num_key, forms in num_word.items():
+        values = list(forms.values())
+        if len(set(values)) == 1:
+            result[f"{num_key}.wav"] = values[0]
+        else:
+            for gender, form_value in forms.items():
+                result[f"{num_key}_{gender}.wav"] = form_value
 
-    "ball_sg.wav":     "мяч",
-    "ball_pl.wav":     "мячи",
-    "ball_gen_pl.wav": "мячей",
+    result.update({
+        "q_color.wav": "Какого цвета",
+        "q_count.wav": "Сколько",
+        "q_tail.wav":  "на картинке?",
+    })
+    return result
 
-    "red_m.wav":    "красный",
-    "red_f.wav":    "красная",
-    "red_n.wav":    "красное",
-    "red_pl.wav":   "красные",
 
-    "blue_m.wav":   "синий",
-    "blue_f.wav":   "синяя",
-    "blue_n.wav":   "синее",
-    "blue_pl.wav":  "синие",
-
-    "light_blue_m.wav":  "голубой",
-    "light_blue_f.wav":  "голубая",
-    "light_blue_n.wav":  "голубое",
-    "light_blue_pl.wav": "голубые",
-
-    "green_m.wav":   "зелёный",
-    "green_f.wav":   "зелёная",
-    "green_n.wav":   "зелёное",
-    "green_pl.wav":  "зелёные",
-
-    "white_m.wav":   "белый",
-    "white_f.wav":   "белая",
-    "white_n.wav":   "белое",
-    "white_pl.wav":  "белые",
-
-    "yellow_m.wav":  "жёлтый",
-    "yellow_f.wav":  "жёлтая",
-    "yellow_n.wav":  "жёлтое",
-    "yellow_pl.wav": "жёлтые",
-
-    "purple_m.wav":  "фиолетовый",
-    "purple_f.wav":  "фиолетовая",
-    "purple_n.wav":  "фиолетовое",
-    "purple_pl.wav": "фиолетовые",
-
-    "pink_m.wav":    "розовый",
-    "pink_f.wav":    "розовая",
-    "pink_n.wav":    "розовое",
-    "pink_pl.wav":   "розовые",
-
-    "grey_m.wav":    "серый",
-    "grey_f.wav":    "серая",
-    "grey_n.wav":    "серое",
-    "grey_pl.wav":   "серые",
-
-    "brown_m.wav":   "коричневый",
-    "brown_f.wav":   "коричневая",
-    "brown_n.wav":   "коричневое",
-    "brown_pl.wav":  "коричневые",
-
-    "q_color.wav": "Какого цвета",
-    "q_count.wav": "Сколько",
-    "q_tail.wav":  "на картинке?",
-}
+TTS_FILES = _build_tts_files(NOUNS, ADJECTIVES, NUM_WORD)
 
 WORD_TO_WAV = {v: k for k, v in TTS_FILES.items()}
 
@@ -507,8 +455,10 @@ class StoryGame:
             for _ in range(ROUNDS_PER_GAME)
         ]
 
-        self.index  = 0
-        self.score  = 0
+        self.index   = 0
+        self.score   = 0
+        self.history = []
+        self.round_attempt_number = 0
 
         self.locked               = False
         self.pending_feedback_audio = None
@@ -530,6 +480,7 @@ class StoryGame:
         self.pending_feedback_audio = None
         self.feedback_time_ms     = 0
         self.advance_time_ms      = 0
+        self.round_attempt_number = 0
 
         self.buttons = []
         for rect, label in zip(self.ui.button_rects, rd["options"]):
@@ -642,7 +593,19 @@ class StoryGame:
 
     def on_choice(self, label, now_ms):
         self.speak_option(label)
-        correct = self.rounds[self.index]["correct"]
+        rd      = self.rounds[self.index]
+        correct = rd["correct"]
+        self.round_attempt_number += 1
+
+        # Record attempt for DB persistence
+        en_key = rd["adj_key"] if rd["qtype"] == "color" else _NUM_EN_MAP.get(rd["count"], str(rd["count"]))
+        self.history.append({
+            "direction": "en_to_ru",
+            "shown":     en_key,
+            "correct":   correct,
+            "ok":        label == correct,
+            "attempt_number": self.round_attempt_number,
+        })
 
         self.locked = True
 
@@ -769,9 +732,6 @@ def finish_screen(screen, ui, score, total):
 # APP
 # -----------------------------
 def main():
-    # NEW: register game2 vocabulary in word_knowledge.json if not present yet
-    ensure_game2_words_present()
-
     pygame.init()
     pygame.mixer.init()
 
@@ -798,6 +758,7 @@ def main():
             if res == "menu":
                 continue
             if res == "finished":
+                update_from_level_game(game.history, game_name="game2")
                 res2 = finish_screen(game.screen, ui, game.score, len(game.rounds))
                 if res2 == "quit":
                     break
