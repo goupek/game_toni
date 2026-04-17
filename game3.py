@@ -1,3 +1,4 @@
+import math
 import pygame
 import random
 import time
@@ -17,26 +18,56 @@ BTN_H = 50
 BTN_W = 140
 PADDING = 20
 
-# Colors (pastel style — match launcher.py palette)
-PURPLE   = (156, 137, 184)   # #9C89B8
-PINK     = (240, 166, 202)   # #F0A6CA
-LIGHT_P  = (239, 195, 230)   # #EFC3E6
-CREAM    = (240, 230, 239)   # #F0E6EF
-LAVENDER = (184, 190, 221)   # #B8BEDD
-TEXT_DARK = (58, 50, 72)
-TEXT_DARK_80 = (78, 68, 95)
-SHADOW_FILL = (190, 185, 174)
+# Launcher palette
+BG_TOP = (128, 183, 181)
+BG_BOTTOM = (109, 164, 172)
+BG_POLY_1 = (117, 170, 166)
+BG_POLY_2 = (100, 151, 160)
+BG_POLY_3 = (92, 142, 154)
+
+PANEL_FILL = (229, 222, 189)
+PANEL_BORDER = (181, 156, 106)
+PANEL_INNER = (243, 237, 210)
+
+RIBBON_FILL = (236, 81, 127)
+RIBBON_DARK = (193, 48, 92)
+RIBBON_LIGHT = (248, 118, 157)
+
+TEXT_DARK = (77, 43, 64)
+TEXT_DARK_80 = (98, 70, 89)
+TEXT_LIGHT = (255, 248, 235)
+OUTLINE_DARK = (99, 61, 81)
+SHADOW_FILL = (153, 136, 148)
+
+BTN_BLUE = (37, 205, 230)
+BTN_BLUE_DARK = (93, 86, 210)
+BTN_GREEN = (166, 231, 12)
+BTN_GREEN_DARK = (111, 179, 26)
+BTN_RED = (245, 112, 112)
+BTN_RED_DARK = (196, 58, 61)
+BTN_YELLOW = (251, 224, 64)
+BTN_YELLOW_DARK = (236, 174, 44)
+BTN_CREAM = (245, 240, 230)
+BTN_CREAM_DARK = (177, 163, 174)
+BTN_PINK = (240, 166, 202)
+BTN_PINK_DARK = (193, 48, 92)
+
+HUD_CREAM = (236, 231, 205)
+HUD_BORDER = (187, 173, 121)
+SUCCESS_FILL = (204, 245, 190)
+ERROR_FILL = (255, 213, 213)
+
 # Legacy names for minimal code change
-BG_COLOR = CREAM
-HEADER_BG = LAVENDER
+BG_COLOR = PANEL_INNER
+HEADER_BG = BTN_CREAM
 TEXT_COLOR = TEXT_DARK
 MUTED_COLOR = TEXT_DARK_80
-GREEN = (129, 199, 132)      # soft green (correct)
-RED = (239, 150, 150)       # soft red (wrong)
-BLUE_ACCENT = PURPLE
+GREEN = BTN_GREEN
+RED = BTN_RED
+BLUE_ACCENT = BTN_BLUE
 SHADOW = SHADOW_FILL
-WHITE = CREAM
-BLACK = PURPLE
+WHITE = BTN_CREAM
+BLACK = OUTLINE_DARK
 
 # Tolerances
 TOL_ON = 25
@@ -88,6 +119,107 @@ def _best_font(size, bold=False):
             pass
     return pygame.font.Font(None, max(14, size))
 
+
+def lighten(color, amount):
+    return tuple(min(255, c + amount) for c in color)
+
+
+def render_tracked_text(font, text, color, tracking=1):
+    text = str(text)
+    if tracking <= 0 or len(text) < 2:
+        return font.render(text, True, color)
+    glyphs = [font.render(ch, True, color) for ch in text]
+    width = sum(g.get_width() for g in glyphs) + tracking * (len(glyphs) - 1)
+    height = max((g.get_height() for g in glyphs), default=font.get_height())
+    surface = pygame.Surface((max(1, width), max(1, height)), pygame.SRCALPHA)
+    x = 0
+    for glyph in glyphs:
+        surface.blit(glyph, (x, (height - glyph.get_height()) // 2))
+        x += glyph.get_width() + tracking
+    return surface
+
+
+def draw_shadow(surface, rect, radius, dy=6):
+    pygame.draw.rect(surface, SHADOW_FILL, rect.move(0, dy), border_radius=radius)
+
+
+def draw_background(surface):
+    w, h = surface.get_size()
+    for y in range(h):
+        t = y / max(1, h - 1)
+        r = int(BG_TOP[0] * (1 - t) + BG_BOTTOM[0] * t)
+        g = int(BG_TOP[1] * (1 - t) + BG_BOTTOM[1] * t)
+        b = int(BG_TOP[2] * (1 - t) + BG_BOTTOM[2] * t)
+        pygame.draw.line(surface, (r, g, b), (0, y), (w, y))
+    polys = [
+        (BG_POLY_1, [(0, h * 0.18), (w * 0.28, 0), (w * 0.5, h * 0.22), (w * 0.2, h * 0.42)]),
+        (BG_POLY_2, [(w * 0.66, 0), (w, 0), (w, h * 0.34), (w * 0.8, h * 0.26)]),
+        (BG_POLY_3, [(0, h), (w * 0.22, h * 0.7), (w * 0.4, h), (0, h)]),
+        (BG_POLY_2, [(w * 0.58, h), (w * 0.78, h * 0.62), (w, h), (w * 0.78, h)]),
+    ]
+    for color, pts in polys:
+        pygame.draw.polygon(surface, color, pts)
+
+
+def draw_panel(surface, rect, radius=28):
+    draw_shadow(surface, rect, radius, dy=8)
+    pygame.draw.rect(surface, PANEL_FILL, rect, border_radius=radius)
+    pygame.draw.rect(surface, PANEL_BORDER, rect, width=4, border_radius=radius)
+    inner = rect.inflate(-10, -10)
+    pygame.draw.rect(surface, PANEL_INNER, inner, width=2, border_radius=max(12, radius - 6))
+
+
+def draw_ribbon_title(surface, text, panel_rect, font):
+    ribbon_h = 70
+    ribbon_w = int(panel_rect.w * 1.08)
+    ribbon_x = panel_rect.centerx - ribbon_w // 2
+    ribbon_y = panel_rect.y + 20
+    ribbon = pygame.Rect(ribbon_x, ribbon_y, ribbon_w, ribbon_h)
+
+    tail_w = 28
+    left_tail = [
+        (ribbon.left, ribbon.top + 14),
+        (ribbon.left - tail_w, ribbon.top + 14),
+        (ribbon.left - 12, ribbon.centery),
+        (ribbon.left - tail_w, ribbon.bottom - 14),
+        (ribbon.left, ribbon.bottom - 14),
+    ]
+    right_tail = [
+        (ribbon.right, ribbon.top + 14),
+        (ribbon.right + tail_w, ribbon.top + 14),
+        (ribbon.right + 12, ribbon.centery),
+        (ribbon.right + tail_w, ribbon.bottom - 14),
+        (ribbon.right, ribbon.bottom - 14),
+    ]
+    pygame.draw.polygon(surface, RIBBON_DARK, left_tail)
+    pygame.draw.polygon(surface, RIBBON_DARK, right_tail)
+    draw_shadow(surface, ribbon, 0, dy=6)
+    pygame.draw.rect(surface, RIBBON_FILL, ribbon)
+    pygame.draw.rect(surface, RIBBON_LIGHT, pygame.Rect(ribbon.x, ribbon.y, ribbon.w, 10))
+    pygame.draw.line(surface, RIBBON_DARK, (ribbon.left, ribbon.bottom - 3), (ribbon.right, ribbon.bottom - 3), 3)
+    txt = render_tracked_text(font, text, TEXT_LIGHT, tracking=1)
+    surface.blit(txt, txt.get_rect(center=ribbon.center))
+    return ribbon
+
+
+def get_layout_rects(view_w, view_h):
+    ui_scale = min(view_w / 1280, view_h / 720)
+    panel_margin_x = max(72, int(92 * ui_scale))
+    panel_margin_y = max(36, int(44 * ui_scale))
+    main_panel = pygame.Rect(
+        panel_margin_x,
+        panel_margin_y,
+        view_w - 2 * panel_margin_x,
+        view_h - 2 * panel_margin_y,
+    )
+    play_area = pygame.Rect(
+        main_panel.x + max(30, int(38 * ui_scale)),
+        main_panel.y + max(126, int(142 * ui_scale)),
+        main_panel.w - 2 * max(30, int(38 * ui_scale)),
+        main_panel.h - max(162, int(184 * ui_scale)),
+    )
+    return ui_scale, main_panel, play_area
+
 # -----------------------
 # UI Helpers
 # -----------------------
@@ -126,10 +258,22 @@ def draw_text_wrapped(surface, text, font, color, rect, align="center"):
         else:
             tx = rect.x
             
-        surf = font.render(line, True, color)
+        surf = render_tracked_text(font, line, color, tracking=1)
         surface.blit(surf, (tx, y_offset))
         y_offset += font.get_linesize()
         
+    return text_block_rect
+
+
+def draw_centered_wrapped_text(surface, text, font, color, center_x, y, max_width):
+    lines = wrap_text_lines(text, font, max_width)
+    total_h = len(lines) * font.get_linesize()
+    text_block_rect = pygame.Rect(center_x - max_width // 2, y, max_width, total_h)
+    cur_y = y
+    for line in lines:
+        surf = render_tracked_text(font, line, color, tracking=1)
+        surface.blit(surf, surf.get_rect(center=(center_x, cur_y + font.get_linesize() // 2)))
+        cur_y += font.get_linesize()
     return text_block_rect
 
 
@@ -149,31 +293,49 @@ def wrap_text_lines(text, font, max_width):
         lines.append(current)
     return lines
 
+
+def wrap_tracked_text_lines(text, font, max_width, tracking=1):
+    words = text.split()
+    lines = []
+    current = ""
+    for word in words:
+        candidate = (current + " " + word).strip()
+        if render_tracked_text(font, candidate, TEXT_DARK, tracking=tracking).get_width() <= max_width:
+            current = candidate
+        else:
+            if current:
+                lines.append(current)
+            current = word
+    if current:
+        lines.append(current)
+    return lines
+
 class Button:
-    def __init__(self, x, y, w, h, label, bg_color=HEADER_BG, text_color=TEXT_COLOR, icon_only=False):
+    def __init__(self, x, y, w, h, label, bg_color=HEADER_BG, text_color=TEXT_COLOR, icon_only=False, depth_color=None):
         self.rect = pygame.Rect(x, y, w, h)
         self.label = label
         self.bg_color = bg_color
         self.text_color = text_color
         self.hovered = False
         self.icon_only = icon_only
+        self.depth_color = depth_color or PANEL_BORDER
 
     def draw(self, screen, font):
-        # Soft shadow (pastel)
-        shadow_rect = self.rect.copy()
-        shadow_rect.x += 3
-        shadow_rect.y += 4
-        pygame.draw.rect(screen, SHADOW_FILL, shadow_rect, border_radius=14)
-        # Body
-        col = (min(self.bg_color[0] + 12, 255), min(self.bg_color[1] + 12, 255), min(self.bg_color[2] + 12, 255)) if self.hovered else self.bg_color
-        pygame.draw.rect(screen, col, self.rect, border_radius=14)
-        # Border
-        border_col = PURPLE if self.hovered else LAVENDER
-        pygame.draw.rect(screen, border_col, self.rect, 2, border_radius=14)
+        top_fill = lighten(self.bg_color, 10) if self.hovered else self.bg_color
+        depth_rect = self.rect.move(0, 7)
+        pygame.draw.rect(screen, self.depth_color, depth_rect, border_radius=max(14, self.rect.h // 4))
+        pygame.draw.rect(screen, top_fill, self.rect, border_radius=max(14, self.rect.h // 4))
+        pygame.draw.rect(
+            screen,
+            lighten(top_fill, 18),
+            (self.rect.x + 6, self.rect.y + 5, self.rect.w - 12, min(12, self.rect.h // 3)),
+            border_radius=10,
+        )
+        pygame.draw.rect(screen, PANEL_BORDER, self.rect, 2, border_radius=max(14, self.rect.h // 4))
 
         if self.icon_only:
             cx, cy = self.rect.center
-            icon_color = CREAM if self.bg_color == BLUE_ACCENT else self.text_color
+            icon_color = TEXT_LIGHT if self.text_color == TEXT_LIGHT else self.text_color
             pygame.draw.polygon(screen, icon_color, [
                 (cx - 5, cy - 5), (cx - 5, cy + 5), (cx + 5, cy + 5), (cx + 5, cy - 5)
             ])
@@ -181,7 +343,7 @@ class Button:
                 (cx + 5, cy - 5), (cx + 12, cy - 10), (cx + 12, cy + 10), (cx + 5, cy + 5)
             ])
         else:
-            txt = font.render(self.label, True, self.text_color)
+            txt = render_tracked_text(font, self.label, self.text_color, tracking=1)
             screen.blit(txt, txt.get_rect(center=self.rect.center))
 
     def check_hover(self, mouse_pos):
@@ -428,15 +590,21 @@ SCENARIOS = [
     {"items": ["table", "chair", "box", "ball", "cup"], "constraints": [{"type": "on", "a": "cup", "b": "table"}, {"type": "on", "a": "ball", "b": "chair"}, {"type": "right_of", "a": "box", "b": "chair"}]},
 ]
 
-def make_items(names):
+def make_items(names, spawn_rect=None):
     sizes = {"table": (280, 130), "chair": (150, 170), "cup": (80, 80), "box": (190, 150), "ball": (80, 80), "book": (130, 80)}
     colors = {"table": (222, 200, 150), "chair": (190, 210, 235), "cup": (240, 220, 235), "box": (215, 235, 210), "ball": (250, 210, 170), "book": (210, 220, 250)}
     items = {}
+    if spawn_rect is None:
+        spawn_rect = pygame.Rect(50, HEADER_H + 50, V_WIDTH - 100, V_HEIGHT - HEADER_H - 100)
     for n in names:
         w, h = sizes[n]
-        x = random.randint(50, V_WIDTH - w - 50)
-        y = random.randint(HEADER_H + 50, V_HEIGHT - h - 50)
-        items[n] = Item(n, x, y, w, h, colors.get(n, LAVENDER))
+        min_x = spawn_rect.x
+        max_x = max(min_x, spawn_rect.right - w)
+        min_y = spawn_rect.y
+        max_y = max(min_y, spawn_rect.bottom - h)
+        x = random.randint(min_x, max_x)
+        y = random.randint(min_y, max_y)
+        items[n] = Item(n, x, y, w, h, colors.get(n, BTN_CREAM))
     return items
 
 
@@ -444,21 +612,26 @@ def draw_hint_card(surface, body_text, loading, title_font, body_font):
     if not loading and not body_text:
         return
 
-    card_rect = pygame.Rect(V_WIDTH - 460, V_HEIGHT - 170, 420, 120)
+    card_w = 420
     pad = 14
     title_gap = 6
     body = "Думаю над подсказкой..." if loading else body_text
+    body_lines = wrap_tracked_text_lines(body, body_font, card_w - pad * 2 - 28, tracking=1)[:4]
+    title_h = title_font.get_height()
+    body_h = max(1, len(body_lines)) * (body_font.get_height() + 4)
+    card_h = max(120, pad * 2 + title_h + title_gap + body_h + 10)
+    card_rect = pygame.Rect(V_WIDTH - 460, V_HEIGHT - (card_h + 50), card_w, card_h)
 
-    pygame.draw.rect(surface, SHADOW_FILL, card_rect.move(3, 4), border_radius=16)
-    pygame.draw.rect(surface, WHITE, card_rect, border_radius=16)
-    pygame.draw.rect(surface, PURPLE, card_rect, 2, border_radius=16)
+    draw_shadow(surface, card_rect, 16, dy=5)
+    pygame.draw.rect(surface, BTN_CREAM, card_rect, border_radius=16)
+    pygame.draw.rect(surface, PANEL_BORDER, card_rect, 2, border_radius=16)
 
-    title = title_font.render("Подсказка", True, PURPLE)
+    title = render_tracked_text(title_font, "Подсказка", TEXT_DARK, tracking=1)
     surface.blit(title, (card_rect.x + pad, card_rect.y + pad))
 
     y = card_rect.y + pad + title.get_height() + title_gap
-    for line in wrap_text_lines(body, body_font, card_rect.w - pad * 2)[:3]:
-        txt = body_font.render(line, True, TEXT_COLOR)
+    for line in body_lines:
+        txt = render_tracked_text(body_font, line, TEXT_COLOR, tracking=1)
         surface.blit(txt, (card_rect.x + pad, y))
         y += txt.get_height() + 4
 
@@ -466,32 +639,39 @@ def draw_hint_card(surface, body_text, loading, title_font, body_font):
 # Main
 # -----------------------
 def main():
+    global V_WIDTH, V_HEIGHT
     pygame.init()
     try:
         pygame.mixer.init(frequency=44100, size=-16, channels=2, buffer=512)
     except:
         pygame.mixer.init()
 
+    info = pygame.display.Info()
+    V_WIDTH = max(960, info.current_w)
+    V_HEIGHT = max(640, info.current_h)
+
     screen = pygame.display.set_mode((V_WIDTH, V_HEIGHT), pygame.RESIZABLE)
     pygame.display.set_caption("Prepositions Game")
     canvas = pygame.Surface((V_WIDTH, V_HEIGHT))
     clock = pygame.time.Clock()
 
-    font_xl = _best_font(42, bold=True)
-    font_lg = _best_font(32)
-    font_md = _best_font(24)
-    font_sm = _best_font(20)
+    font_xl = _best_font(40, bold=True)
+    font_lg = _best_font(34, bold=True)
+    font_md = _best_font(20, bold=True)
+    font_btn = _best_font(24, bold=True)
+    font_instr = _best_font(24, bold=True)
+    font_sm = _best_font(18)
+    font_tiny = _best_font(16)
 
-    # UI Buttons (pastel palette)
-    btn_y = 30
-    btn_check  = Button(V_WIDTH - (4 * (BTN_W + 10)) - 20, btn_y, BTN_W, BTN_H, "Check", bg_color=LAVENDER, text_color=TEXT_DARK)
-    btn_reset  = Button(V_WIDTH - (3 * (BTN_W + 10)) - 20, btn_y, BTN_W, BTN_H, "Reset", bg_color=LAVENDER, text_color=TEXT_DARK)
-    btn_hint   = Button(V_WIDTH - (2 * (BTN_W + 10)) - 20, btn_y, BTN_W, BTN_H, "Hint", bg_color=PINK, text_color=CREAM)
-    btn_next   = Button(V_WIDTH - (1 * (BTN_W + 10)) - 20, btn_y, BTN_W, BTN_H, "Next", bg_color=PURPLE, text_color=CREAM)
+    row_btn_w = 156
+    btn_check  = Button(0, 0, row_btn_w, BTN_H, "Check", bg_color=BTN_CREAM, text_color=TEXT_DARK, depth_color=BTN_CREAM_DARK)
+    btn_reset  = Button(0, 0, row_btn_w, BTN_H, "Reset", bg_color=BTN_CREAM, text_color=TEXT_DARK, depth_color=BTN_CREAM_DARK)
+    btn_hint   = Button(0, 0, row_btn_w, BTN_H, "Hint", bg_color=BTN_YELLOW, text_color=TEXT_DARK, depth_color=BTN_YELLOW_DARK)
+    btn_next   = Button(0, 0, row_btn_w, BTN_H, "Next", bg_color=BTN_BLUE, text_color=TEXT_LIGHT, depth_color=BTN_BLUE_DARK)
 
-    btn_speaker = Button(0, 0, 50, 50, "", bg_color=PINK, text_color=CREAM, icon_only=True)
+    btn_speaker = Button(0, 0, 44, 44, "", bg_color=BTN_BLUE, text_color=TEXT_LIGHT, icon_only=True, depth_color=BTN_BLUE_DARK)
 
-    btn_restart = Button(V_WIDTH // 2 - 160, V_HEIGHT // 2 + 80, 320, 60, "Сыграть снова", bg_color=PURPLE, text_color=CREAM)
+    btn_restart = Button(V_WIDTH // 2 - 160, V_HEIGHT // 2 + 80, 320, 60, "Сыграть снова", bg_color=BTN_BLUE, text_color=TEXT_LIGHT, depth_color=BTN_BLUE_DARK)
 
     buttons = [btn_check, btn_reset, btn_hint, btn_next, btn_speaker, btn_restart]
 
@@ -543,7 +723,14 @@ def main():
     def load_level(i):
         nonlocal items, constraints, text_instr, feedback, level_attempt_number, level_wrong_checks
         data = SCENARIOS[i]
-        items = make_items(data["items"])
+        ui_scale, _main_panel, play_area = get_layout_rects(V_WIDTH, V_HEIGHT)
+        spawn_rect = pygame.Rect(
+            play_area.x + max(18, int(22 * ui_scale)),
+            play_area.y + BTN_H + max(42, int(52 * ui_scale)),
+            play_area.w - 2 * max(18, int(22 * ui_scale)),
+            play_area.h - BTN_H - max(70, int(84 * ui_scale)),
+        )
+        items = make_items(data["items"], spawn_rect)
         constraints = data["constraints"]
         text_instr = instruction_text(constraints)
         feedback = ""
@@ -562,6 +749,7 @@ def main():
             scale = min(w / V_WIDTH, h / V_HEIGHT)
             new_w, new_h = int(V_WIDTH * scale), int(V_HEIGHT * scale)
             offset_x, offset_y = (w - new_w) // 2, (h - new_h) // 2
+            ui_scale = min(V_WIDTH / 1280, V_HEIGHT / 720)
 
             mouse_raw = pygame.mouse.get_pos()
             mx = (mouse_raw[0] - offset_x) / scale
@@ -658,55 +846,83 @@ def main():
             if feedback and time.time() - fb_timer > 3:
                 feedback = ""
 
-            canvas.fill(BG_COLOR)
-            pygame.draw.rect(canvas, PINK, (0, 0, V_WIDTH, HEADER_H - 8))
-            pygame.draw.rect(canvas, LIGHT_P, (0, HEADER_H - 8, V_WIDTH, 8))
-            pygame.draw.line(canvas, LAVENDER, (0, HEADER_H), (V_WIDTH, HEADER_H), 2)
+            draw_background(canvas)
+            ui_scale, main_panel, play_area = get_layout_rects(V_WIDTH, V_HEIGHT)
+            draw_panel(canvas, main_panel, max(24, int(32 * ui_scale)))
+            ribbon_rect = draw_ribbon_title(canvas, "Word Positions", main_panel, font_lg)
+            pygame.draw.rect(canvas, PANEL_INNER, play_area, border_radius=max(18, int(22 * ui_scale)))
+            pygame.draw.rect(canvas, HUD_BORDER, play_area, 2, border_radius=max(18, int(22 * ui_scale)))
 
-            # Score (left) + example counter (center)
-            score_surf = font_lg.render(f"Счёт: {score}/{len(SCENARIOS)}", True, TEXT_COLOR)
-            canvas.blit(score_surf, (30, 45))
+            btn_gap = max(18, int(24 * ui_scale))
+            top_row_y = play_area.y + max(16, int(20 * ui_scale))
+            step_surf = render_tracked_text(font_xl, f"{idx + 1}/{len(SCENARIOS)}", TEXT_COLOR, tracking=1)
+            step_rect = step_surf.get_rect(center=(play_area.centerx, top_row_y + BTN_H // 2))
 
-            ex_surf = font_xl.render(f"{idx + 1}/{len(SCENARIOS)}", True, TEXT_COLOR)
-            canvas.blit(ex_surf, ex_surf.get_rect(center=(V_WIDTH // 2, 60)))
+            left_group_w = btn_check.rect.w + btn_reset.rect.w + btn_gap
+            right_group_w = btn_hint.rect.w + btn_next.rect.w + btn_gap
+            row_pad = max(18, int(24 * ui_scale))
+            center_gap = max(34, int(44 * ui_scale))
+
+            left_group_right = step_rect.left - center_gap
+            left_group_x = max(play_area.x + row_pad, left_group_right - left_group_w)
+            right_group_x = min(play_area.right - row_pad - right_group_w, step_rect.right + center_gap)
+
+            btn_check.rect.topleft = (left_group_x, top_row_y)
+            btn_reset.rect.topleft = (left_group_x + btn_check.rect.w + btn_gap, top_row_y)
+            btn_hint.rect.topleft = (right_group_x, top_row_y)
+            btn_next.rect.topleft = (right_group_x + btn_hint.rect.w + btn_gap, top_row_y)
+
+            canvas.blit(step_surf, step_rect)
 
             if not game_over:
                 btn_hint.label = "Thinking..." if hint_session.hint_loading else "Hint"
                 for b in [btn_check, btn_reset, btn_hint, btn_next]:
-                    b.draw(canvas, font_md)
+                    b.draw(canvas, font_btn)
 
             if not game_over:
-                instr_rect_area = pygame.Rect(100, 95, V_WIDTH - 200, 60)
-                text_bounds = draw_text_wrapped(canvas, text_instr, font_lg, MUTED_COLOR, instr_rect_area)
+                instruction_band_top = ribbon_rect.bottom + max(8, int(10 * ui_scale))
+                instruction_band_bottom = play_area.y - max(8, int(10 * ui_scale))
+                instruction_band_h = max(40, instruction_band_bottom - instruction_band_top)
+                speaker_margin = max(20, int(26 * ui_scale))
+                btn_speaker.rect.x = main_panel.x + speaker_margin
+                btn_speaker.rect.y = instruction_band_top + (instruction_band_h - btn_speaker.rect.h) // 2
 
-                # Update speaker button pos to be left of text
-                btn_speaker.rect.x = text_bounds.x - 60
-                btn_speaker.rect.y = text_bounds.centery - 25
+                left_text_edge = btn_speaker.rect.right + max(18, int(22 * ui_scale))
+                right_text_edge = main_panel.right - max(28, int(34 * ui_scale))
+                text_max_width = min(
+                    main_panel.w - 2 * max(110, int(130 * ui_scale)),
+                    2 * min(main_panel.centerx - left_text_edge, right_text_edge - main_panel.centerx),
+                )
+                text_max_width = max(360, int(text_max_width))
+                text_y = instruction_band_top + (instruction_band_h - font_instr.get_linesize()) // 2
+                draw_centered_wrapped_text(
+                    canvas,
+                    text_instr,
+                    font_instr,
+                    TEXT_DARK,
+                    main_panel.centerx,
+                    text_y,
+                    text_max_width,
+                )
+
                 btn_speaker.draw(canvas, font_md)
-
-            if not game_over and not (hint_session.hint_loading or hint_session.hint_text):
-                hint_surf = font_sm.render("Перетащите объекты, следуя инструкции.", True, MUTED_COLOR)
-                canvas.blit(hint_surf, (V_WIDTH - hint_surf.get_width() - 20, V_HEIGHT - 30))
 
             # Final score overlay (pastel)
             if game_over:
                 overlay = pygame.Surface((V_WIDTH, V_HEIGHT), pygame.SRCALPHA)
-                overlay.fill((58, 50, 72, 140))
+                overlay.fill((77, 43, 64, 120))
                 canvas.blit(overlay, (0, 0))
 
                 panel = pygame.Rect(V_WIDTH // 2 - 360, V_HEIGHT // 2 - 160, 720, 320)
-                panel_surf = pygame.Surface((panel.width, panel.height), pygame.SRCALPHA)
-                panel_surf.fill((*CREAM, 250))
-                canvas.blit(panel_surf, panel.topleft)
-                pygame.draw.rect(canvas, PURPLE, panel, 2, border_radius=20)
+                draw_panel(canvas, panel, 24)
 
-                done_title = font_xl.render("Игра окончена!", True, TEXT_COLOR)
+                done_title = render_tracked_text(font_xl, "Игра окончена!", TEXT_COLOR, tracking=1)
                 canvas.blit(done_title, done_title.get_rect(center=(V_WIDTH // 2, panel.top + 70)))
 
-                score_big = font_xl.render(f"Ваш счёт: {score} / {len(SCENARIOS)}", True, PURPLE)
+                score_big = render_tracked_text(font_xl, f"Ваш счёт: {score} / {len(SCENARIOS)}", TEXT_DARK, tracking=1)
                 canvas.blit(score_big, score_big.get_rect(center=(V_WIDTH // 2, panel.top + 140)))
 
-                tip = font_md.render("Нажмите «Сыграть снова», чтобы начать заново.", True, MUTED_COLOR)
+                tip = render_tracked_text(font_md, "Нажмите «Сыграть снова», чтобы начать заново.", MUTED_COLOR, tracking=1)
                 canvas.blit(tip, tip.get_rect(center=(V_WIDTH // 2, panel.top + 205)))
 
                 btn_restart.draw(canvas, font_md)
@@ -721,13 +937,13 @@ def main():
 
             # Feedback (near bottom, drawn AFTER objects so it stays on top)
             if feedback and not game_over:
-                fb_surf = font_xl.render(feedback, True, feedback_col)
+                fb_surf = render_tracked_text(font_xl, feedback, TEXT_DARK, tracking=1)
                 fb_rect = fb_surf.get_rect(center=(V_WIDTH // 2, V_HEIGHT - 95))
                 bg_rect = fb_rect.inflate(40, 20)
-                s = pygame.Surface((bg_rect.width, bg_rect.height), pygame.SRCALPHA)
-                s.fill((*LAVENDER, 248))
-                canvas.blit(s, bg_rect.topleft)
-                pygame.draw.rect(canvas, PURPLE, bg_rect, 2, border_radius=16)
+                draw_shadow(canvas, bg_rect, 16, dy=5)
+                fill = SUCCESS_FILL if feedback_col == GREEN else ERROR_FILL
+                pygame.draw.rect(canvas, fill, bg_rect, border_radius=16)
+                pygame.draw.rect(canvas, PANEL_BORDER, bg_rect, 2, border_radius=16)
                 canvas.blit(fb_surf, fb_rect.topleft)
 
             scaled_surf = pygame.transform.smoothscale(canvas, (new_w, new_h))

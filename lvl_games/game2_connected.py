@@ -51,22 +51,49 @@ BASE_DIR  = str(_ROOT)
 IMG_DIR   = os.path.join(BASE_DIR, "images")
 AUDIO_DIR = os.path.join(BASE_DIR, "audio")
 
-# Pastel style (match launcher.py palette)
-PURPLE   = (156, 137, 184)   # #9C89B8
-PINK     = (240, 166, 202)   # #F0A6CA
-LIGHT_P  = (239, 195, 230)   # #EFC3E6
-CREAM    = (240, 230, 239)   # #F0E6EF
-LAVENDER = (184, 190, 221)   # #B8BEDD
-TEXT_DARK = (58, 50, 72)
-SHADOW_FILL = (190, 185, 174)
-BG    = CREAM
-WHITE = CREAM
+# Launcher style
+BG_TOP = (128, 183, 181)
+BG_BOTTOM = (109, 164, 172)
+BG_POLY_1 = (117, 170, 166)
+BG_POLY_2 = (100, 151, 160)
+BG_POLY_3 = (92, 142, 154)
+
+PANEL_FILL = (229, 222, 189)
+PANEL_BORDER = (181, 156, 106)
+PANEL_INNER = (243, 237, 210)
+
+RIBBON_FILL = (236, 81, 127)
+RIBBON_DARK = (193, 48, 92)
+RIBBON_LIGHT = (248, 118, 157)
+
+TEXT_DARK = (77, 43, 64)
+TEXT_SOFT = (98, 70, 89)
+TEXT_LIGHT = (255, 248, 235)
+OUTLINE_DARK = (99, 61, 81)
+SHADOW_FILL = (153, 136, 148)
+
+BTN_BLUE = (37, 205, 230)
+BTN_BLUE_DARK = (93, 86, 210)
+BTN_GREEN = (166, 231, 12)
+BTN_GREEN_DARK = (111, 179, 26)
+BTN_RED = (245, 112, 112)
+BTN_RED_DARK = (196, 58, 61)
+BTN_YELLOW = (251, 224, 64)
+BTN_YELLOW_DARK = (236, 174, 44)
+BTN_CREAM = (245, 240, 230)
+BTN_CREAM_DARK = (177, 163, 174)
+
+SUCCESS_FILL = (204, 245, 190)
+ERROR_FILL = (255, 213, 213)
+
+BG    = PANEL_INNER
+WHITE = BTN_CREAM
 BLACK = TEXT_DARK
-GRAY  = LAVENDER
-DARK  = PURPLE
-BLUE  = PURPLE
-GREEN = (129, 199, 132)      # soft green (correct)
-RED   = (239, 150, 150)      # soft red (wrong)
+GRAY  = BTN_CREAM
+DARK  = PANEL_BORDER
+BLUE  = BTN_BLUE
+GREEN = BTN_GREEN
+RED   = BTN_RED
 
 WORD_TO_FEEDBACK_DELAY_MS = 1000
 CORRECT_NEXT_DELAY_MS     = 2000
@@ -96,6 +123,85 @@ def _best_font(size, bold=False):
         except Exception:
             pass
     return pygame.font.Font(None, max(14, size))
+
+
+def lighten(color, amount):
+    return tuple(min(255, c + amount) for c in color)
+
+
+def render_tracked_text(font, text, color, tracking=1):
+    text = str(text)
+    if tracking <= 0 or len(text) < 2:
+        return font.render(text, True, color)
+    glyphs = [font.render(ch, True, color) for ch in text]
+    width = sum(g.get_width() for g in glyphs) + tracking * (len(glyphs) - 1)
+    height = max((g.get_height() for g in glyphs), default=font.get_height())
+    surface = pygame.Surface((max(1, width), max(1, height)), pygame.SRCALPHA)
+    x = 0
+    for glyph in glyphs:
+        surface.blit(glyph, (x, (height - glyph.get_height()) // 2))
+        x += glyph.get_width() + tracking
+    return surface
+
+
+def draw_background(screen, w, h):
+    for y in range(h):
+        t = y / max(1, h - 1)
+        r = int(BG_TOP[0] * (1 - t) + BG_BOTTOM[0] * t)
+        g = int(BG_TOP[1] * (1 - t) + BG_BOTTOM[1] * t)
+        b = int(BG_TOP[2] * (1 - t) + BG_BOTTOM[2] * t)
+        pygame.draw.line(screen, (r, g, b), (0, y), (w, y))
+    polys = [
+        (BG_POLY_1, [(0, h * 0.18), (w * 0.28, 0), (w * 0.5, h * 0.22), (w * 0.2, h * 0.42)]),
+        (BG_POLY_2, [(w * 0.66, 0), (w, 0), (w, h * 0.34), (w * 0.8, h * 0.26)]),
+        (BG_POLY_3, [(0, h), (w * 0.22, h * 0.7), (w * 0.4, h), (0, h)]),
+        (BG_POLY_2, [(w * 0.58, h), (w * 0.78, h * 0.62), (w, h), (w * 0.78, h)]),
+    ]
+    for color, pts in polys:
+        pygame.draw.polygon(screen, color, pts)
+
+
+def draw_shadow(screen, rect, radius, dy=6):
+    pygame.draw.rect(screen, SHADOW_FILL, rect.move(0, dy), border_radius=radius)
+
+
+def draw_panel(screen, rect, radius=28):
+    draw_shadow(screen, rect, radius, dy=8)
+    pygame.draw.rect(screen, PANEL_FILL, rect, border_radius=radius)
+    pygame.draw.rect(screen, PANEL_BORDER, rect, width=4, border_radius=radius)
+    inner = rect.inflate(-10, -10)
+    pygame.draw.rect(screen, PANEL_INNER, inner, width=2, border_radius=max(12, radius - 6))
+
+
+def draw_ribbon_title(screen, text, panel_rect, font, s):
+    ribbon_h = max(56, int(72 * s))
+    ribbon_w = int(panel_rect.w * 1.08)
+    ribbon_x = panel_rect.centerx - ribbon_w // 2
+    ribbon_y = panel_rect.y + max(18, int(22 * s))
+    ribbon = pygame.Rect(ribbon_x, ribbon_y, ribbon_w, ribbon_h)
+    tail_w = max(20, int(32 * s))
+    left_tail = [
+        (ribbon.left, ribbon.top + 14),
+        (ribbon.left - tail_w, ribbon.top + 14),
+        (ribbon.left - 12, ribbon.centery),
+        (ribbon.left - tail_w, ribbon.bottom - 14),
+        (ribbon.left, ribbon.bottom - 14),
+    ]
+    right_tail = [
+        (ribbon.right, ribbon.top + 14),
+        (ribbon.right + tail_w, ribbon.top + 14),
+        (ribbon.right + 12, ribbon.centery),
+        (ribbon.right + tail_w, ribbon.bottom - 14),
+        (ribbon.right, ribbon.bottom - 14),
+    ]
+    pygame.draw.polygon(screen, RIBBON_DARK, left_tail)
+    pygame.draw.polygon(screen, RIBBON_DARK, right_tail)
+    draw_shadow(screen, ribbon, 0, dy=max(4, int(6 * s)))
+    pygame.draw.rect(screen, RIBBON_FILL, ribbon)
+    pygame.draw.rect(screen, RIBBON_LIGHT, pygame.Rect(ribbon.x, ribbon.y, ribbon.w, max(8, int(12 * s))))
+    pygame.draw.line(screen, RIBBON_DARK, (ribbon.left, ribbon.bottom - 3), (ribbon.right, ribbon.bottom - 3), 3)
+    txt = render_tracked_text(font, text, TEXT_LIGHT, tracking=1)
+    screen.blit(txt, txt.get_rect(center=ribbon.center))
 
 # -----------------------------
 # TTS AUDIO
@@ -261,7 +367,7 @@ class Button:
         self.rect        = pygame.Rect(rect)
         self.label       = label
         self.border      = DARK
-        self.bg          = bg if bg is not None else LAVENDER
+        self.bg          = bg if bg is not None else BTN_CREAM
         self.text_color  = text_color if text_color is not None else BLACK
         self.show_replay = show_replay
         self.replay_rect = None
@@ -279,17 +385,30 @@ class Button:
         return self.replay_rect is not None and self.replay_rect.collidepoint(pos)
 
     def draw(self, screen, font, border_w, s, replay_icon_surf=None):
-        # Soft shadow (pastel)
-        shadow_r = self.rect.move(3, 4)
-        pygame.draw.rect(screen, SHADOW_FILL, shadow_r, border_radius=14)
+        depth = BTN_CREAM_DARK
+        if self.bg == BTN_BLUE:
+            depth = BTN_BLUE_DARK
+        elif self.bg == BTN_YELLOW:
+            depth = BTN_YELLOW_DARK
+        elif self.bg == BTN_GREEN:
+            depth = BTN_GREEN_DARK
+        elif self.bg == BTN_RED:
+            depth = BTN_RED_DARK
+        pygame.draw.rect(screen, depth, self.rect.move(0, max(4, int(7 * s))), border_radius=14)
         pygame.draw.rect(screen, self.bg, self.rect, border_radius=14)
+        pygame.draw.rect(
+            screen,
+            lighten(self.bg, 18),
+            (self.rect.x + 6, self.rect.y + 5, self.rect.w - 12, min(12, self.rect.h // 3)),
+            border_radius=10,
+        )
         pygame.draw.rect(screen, self.border, self.rect, width=border_w, border_radius=14)
 
         replay_space = int(90 * s) if self.show_replay else 0
         text_area    = self.rect.copy()
         text_area.w -= replay_space
 
-        txt = font.render(self.label, True, self.text_color)
+        txt = render_tracked_text(font, self.label, self.text_color, tracking=1)
         screen.blit(txt, txt.get_rect(center=text_area.center))
 
         if self.show_replay:
@@ -327,39 +446,60 @@ class UI:
         def sc(v):
             return max(1, int(v * self.s))
 
-        self.font_title      = _best_font(sc(76), bold=True)
-        self.font_prompt     = _best_font(sc(54))
-        self.font_btn        = _best_font(sc(54))
+        self.font_title      = _best_font(sc(54), bold=True)
+        self.font_prompt     = _best_font(sc(40), bold=True)
+        self.font_btn        = _best_font(sc(34), bold=True)
         self.font_hint       = _best_font(sc(28))
-        self.font_small      = _best_font(sc(30))
-        self.font_menu_title = _best_font(sc(90), bold=True)
-        self.font_menu_btn   = _best_font(sc(60))
+        self.font_small      = _best_font(sc(24), bold=True)
+        self.font_menu_title = _best_font(sc(60), bold=True)
+        self.font_menu_btn   = _best_font(sc(38), bold=True)
 
         self.border_w = max(2, sc(6))
 
-        side_margin   = sc(60)
-        content_left  = side_margin
-        content_right = w - side_margin
+        panel_margin_x = max(sc(72), int(92 * self.s))
+        panel_margin_y = max(sc(36), int(44 * self.s))
+        self.panel_rect = pygame.Rect(
+            panel_margin_x,
+            panel_margin_y,
+            w - 2 * panel_margin_x,
+            h - 2 * panel_margin_y,
+        )
+
+        inner_pad_x = max(sc(22), int(28 * self.s))
+        inner_pad_y = max(sc(18), int(22 * self.s))
+        content_left  = self.panel_rect.x + inner_pad_x
+        content_right = self.panel_rect.right - inner_pad_x
         content_w     = content_right - content_left
 
-        v_gap   = sc(24)
-        h_gap   = sc(40)
-        top_pad = sc(10)
+        v_gap   = sc(22)
+        h_gap   = sc(34)
+        top_pad = self.panel_rect.y + inner_pad_y
 
-        self.title_area = pygame.Rect(content_left, top_pad, content_w, sc(70))
+        self.title_area = pygame.Rect(content_left, top_pad, content_w, sc(54))
         hint_w = sc(220)
         hint_h = sc(64)
+        progress_h = sc(24)
+        top_row_gap = max(sc(16), int(18 * self.s))
+        progress_w = max(sc(280), content_w - hint_w - top_row_gap)
+        progress_y = top_pad + (hint_h - progress_h) // 2
+        self.progress_bar = pygame.Rect(
+            content_left,
+            progress_y,
+            progress_w,
+            progress_h,
+        )
         self.hint_button = pygame.Rect(
             content_right - hint_w,
             top_pad,
             hint_w,
             hint_h,
         )
+        prompt_gap = max(sc(12), int(14 * self.s))
         self.prompt_area = pygame.Rect(
             content_left,
-            self.title_area.bottom + sc(15),
+            self.hint_button.bottom + prompt_gap,
             content_w,
-            sc(150),
+            sc(118),
         )
 
         rep_size = sc(64)
@@ -370,17 +510,8 @@ class UI:
             rep_size, rep_size,
         )
 
-        progress_h           = sc(24)
-        progress_bottom_pad  = sc(60)
-        self.progress_bar = pygame.Rect(
-            content_left,
-            h - progress_bottom_pad,
-            content_w,
-            progress_h,
-        )
-
         top_y    = self.prompt_area.bottom + v_gap
-        bottom_y = self.progress_bar.y - v_gap
+        bottom_y = self.panel_rect.bottom - inner_pad_y
         content_h = max(1, bottom_y - top_y)
 
         image_w   = int(content_w * 0.58)
@@ -402,9 +533,10 @@ class UI:
         ]
 
         menu_btn_w, menu_btn_h = sc(300), sc(120)
-        self.menu_play  = pygame.Rect((w - menu_btn_w) // 2, sc(330), menu_btn_w, menu_btn_h)
-        self.menu_exit  = pygame.Rect((w - menu_btn_w) // 2, sc(480), menu_btn_w, menu_btn_h)
-        self.finish_menu = pygame.Rect((w - menu_btn_w) // 2, sc(500), menu_btn_w, menu_btn_h)
+        menu_start_y = self.panel_rect.y + sc(240)
+        self.menu_play  = pygame.Rect((w - menu_btn_w) // 2, menu_start_y, menu_btn_w, menu_btn_h)
+        self.menu_exit  = pygame.Rect((w - menu_btn_w) // 2, menu_start_y + sc(150), menu_btn_w, menu_btn_h)
+        self.finish_menu = pygame.Rect((w - menu_btn_w) // 2, self.panel_rect.bottom - sc(170), menu_btn_w, menu_btn_h)
 
         if self.replay_raw:
             ps = max(1, int(self.prompt_replay.w * 0.70))
@@ -420,8 +552,8 @@ class UI:
 # -----------------------------
 def run_menu(screen, ui):
     clock    = pygame.time.Clock()
-    play_btn = Button(ui.menu_play, "Play", bg=PURPLE, text_color=CREAM)
-    exit_btn = Button(ui.menu_exit, "Exit")
+    play_btn = Button(ui.menu_play, "Play", bg=BTN_BLUE, text_color=TEXT_LIGHT)
+    exit_btn = Button(ui.menu_exit, "Exit", bg=BTN_CREAM, text_color=TEXT_DARK)
 
     while True:
         for event in pygame.event.get():
@@ -438,13 +570,9 @@ def run_menu(screen, ui):
                 if exit_btn.hit(event.pos):
                     return "quit"
 
-        screen.fill(BG)
-        # Pastel header strip
-        header_h = int(140 * ui.s)
-        pygame.draw.rect(screen, PINK, (0, 0, ui.w, header_h - 6))
-        pygame.draw.rect(screen, LIGHT_P, (0, header_h - 6, ui.w, 6))
-        title = ui.font_menu_title.render("Game 2 (adaptive)", True, CREAM)
-        screen.blit(title, title.get_rect(center=(ui.w // 2, header_h // 2)))
+        draw_background(screen, ui.w, ui.h)
+        draw_panel(screen, ui.panel_rect, max(24, int(32 * ui.s)))
+        draw_ribbon_title(screen, "Game 2", ui.panel_rect, ui.font_menu_title, ui.s)
 
         play_btn.draw(screen, ui.font_menu_btn, ui.border_w, ui.s, replay_icon_surf=None)
         exit_btn.draw(screen, ui.font_menu_btn, ui.border_w, ui.s, replay_icon_surf=None)
@@ -462,7 +590,7 @@ class StoryGame:
         self.clock  = pygame.time.Clock()
         self.hint_engine = HintEngine()
         self.hint_results: "queue.Queue[tuple[int, str]]" = queue.Queue()
-        self.hint_button = Button(ui.hint_button, "Подсказка", bg=PURPLE, text_color=CREAM)
+        self.hint_button = Button(ui.hint_button, "Подсказка", bg=BTN_YELLOW, text_color=TEXT_DARK)
 
         # NEW: use filtered generator instead of generate_round
         self.rounds = [
@@ -624,17 +752,17 @@ class StoryGame:
             card_h,
         )
 
-        pygame.draw.rect(self.screen, SHADOW_FILL, card_rect.move(3, 4), border_radius=14)
-        pygame.draw.rect(self.screen, WHITE, card_rect, border_radius=14)
-        pygame.draw.rect(self.screen, DARK, card_rect, 3, border_radius=14)
+        draw_shadow(self.screen, card_rect, 14, dy=5)
+        pygame.draw.rect(self.screen, BTN_CREAM, card_rect, border_radius=14)
+        pygame.draw.rect(self.screen, PANEL_BORDER, card_rect, 3, border_radius=14)
 
-        title = self.ui.font_small.render("Подсказка", True, PURPLE)
+        title = render_tracked_text(self.ui.font_small, "Hint", TEXT_DARK, tracking=1)
         self.screen.blit(title, (card_rect.x + pad, card_rect.y + pad))
 
         lines = wrap_text(body, self.ui.font_hint, card_rect.w - pad * 2)
         y = card_rect.y + pad + title.get_height() + title_gap
         for line in lines[:3]:
-            txt = self.ui.font_hint.render(line, True, BLACK)
+            txt = render_tracked_text(self.ui.font_hint, line, BLACK, tracking=1)
             self.screen.blit(txt, (card_rect.x + pad, y))
             y += txt.get_height() + max(2, int(4 * self.ui.s))
 
@@ -642,23 +770,21 @@ class StoryGame:
         total = len(self.rounds)
         bar   = self.ui.progress_bar
 
-        pygame.draw.rect(self.screen, GRAY, bar, border_radius=8)
+        pygame.draw.rect(self.screen, BTN_CREAM, bar, border_radius=8)
         fill_w = int(bar.w * ((self.index + 1) / total))
-        pygame.draw.rect(self.screen, BLUE, (bar.x, bar.y, fill_w, bar.h), border_radius=8)
-        pygame.draw.rect(self.screen, DARK, bar, 2, border_radius=8)
+        pygame.draw.rect(self.screen, BTN_BLUE, (bar.x, bar.y, fill_w, bar.h), border_radius=8)
+        pygame.draw.rect(self.screen, PANEL_BORDER, bar, 2, border_radius=8)
 
         label = "Progress: {}/{}".format(self.index + 1, total)
-        txt   = self.ui.font_small.render(label, True, BLACK)
+        txt   = render_tracked_text(self.ui.font_small, label, BLACK, tracking=1)
         self.screen.blit(txt, (bar.x, bar.y - txt.get_height() - 6))
 
     def draw(self):
-        self.screen.fill(BG)
-
-        title = self.ui.font_title.render("Game 2", True, BLACK)
-        self.screen.blit(title, (self.ui.title_area.x, self.ui.title_area.y))
-        self.hint_button.label = "Думаю..." if self.hint_loading else "Подсказка"
-        self.hint_button.bg = LIGHT_P if (self.hint_loading or self.locked) else PURPLE
-        self.hint_button.text_color = BLACK if (self.hint_loading or self.locked) else CREAM
+        draw_background(self.screen, self.ui.w, self.ui.h)
+        draw_panel(self.screen, self.ui.panel_rect, max(24, int(32 * self.ui.s)))
+        self.hint_button.label = "Thinking..." if self.hint_loading else "Hint"
+        self.hint_button.bg = BTN_CREAM if (self.hint_loading or self.locked) else BTN_YELLOW
+        self.hint_button.text_color = BLACK
         self.hint_button.draw(
             self.screen,
             self.ui.font_small,
@@ -667,9 +793,9 @@ class StoryGame:
             replay_icon_surf=None,
         )
 
-        pygame.draw.rect(self.screen, SHADOW_FILL, self.ui.prompt_area.move(3, 4), border_radius=14)
-        pygame.draw.rect(self.screen, LAVENDER, self.ui.prompt_area, border_radius=14)
-        pygame.draw.rect(self.screen, DARK, self.ui.prompt_area, 3, border_radius=14)
+        draw_shadow(self.screen, self.ui.prompt_area, 14, dy=5)
+        pygame.draw.rect(self.screen, BTN_CREAM, self.ui.prompt_area, border_radius=14)
+        pygame.draw.rect(self.screen, PANEL_BORDER, self.ui.prompt_area, 3, border_radius=14)
 
         prompt    = self.rounds[self.index]["prompt_text"]
         text_max_w = (
@@ -682,27 +808,27 @@ class StoryGame:
 
         y = self.ui.prompt_area.y + max(5, int(25 * self.ui.s))
         for line in lines[:2]:
-            t = self.ui.font_prompt.render(line, True, BLACK)
+            t = render_tracked_text(self.ui.font_prompt, line, BLACK, tracking=1)
             self.screen.blit(t, (self.ui.prompt_area.x + max(5, int(15 * self.ui.s)), y))
             y += t.get_height() + max(2, int(8 * self.ui.s))
 
-        pygame.draw.rect(self.screen, WHITE, self.ui.prompt_replay, border_radius=12)
-        pygame.draw.rect(self.screen, DARK, self.ui.prompt_replay, 2, border_radius=12)
+        pygame.draw.rect(self.screen, BTN_CREAM, self.ui.prompt_replay, border_radius=12)
+        pygame.draw.rect(self.screen, PANEL_BORDER, self.ui.prompt_replay, 2, border_radius=12)
         if self.ui.prompt_replay_icon:
             icon_rect = self.ui.prompt_replay_icon.get_rect(
                 center=self.ui.prompt_replay.center,
             )
             self.screen.blit(self.ui.prompt_replay_icon, icon_rect)
 
-        pygame.draw.rect(self.screen, SHADOW_FILL, self.ui.image_area.move(3, 4), border_radius=14)
-        pygame.draw.rect(self.screen, LAVENDER, self.ui.image_area, border_radius=14)
-        pygame.draw.rect(self.screen, DARK, self.ui.image_area, 3, border_radius=14)
+        draw_shadow(self.screen, self.ui.image_area, 14, dy=5)
+        pygame.draw.rect(self.screen, BTN_CREAM, self.ui.image_area, border_radius=14)
+        pygame.draw.rect(self.screen, PANEL_BORDER, self.ui.image_area, 3, border_radius=14)
 
         if self.fit_image:
             img_rect = self.fit_image.get_rect(center=self.ui.image_area.center)
             self.screen.blit(self.fit_image, img_rect)
         else:
-            miss = self.ui.font_small.render("No image", True, RED)
+            miss = render_tracked_text(self.ui.font_small, "No image", TEXT_DARK, tracking=1)
             self.screen.blit(miss, (self.ui.image_area.x + 20, self.ui.image_area.y + 20))
 
         for b in self.buttons:
@@ -836,7 +962,7 @@ class StoryGame:
 # -----------------------------
 def finish_screen(screen, ui, score, total):
     clock    = pygame.time.Clock()
-    menu_btn = Button(ui.finish_menu, "Menu")
+    menu_btn = Button(ui.finish_menu, "Menu", bg=BTN_BLUE, text_color=TEXT_LIGHT)
 
     while True:
         for event in pygame.event.get():
@@ -852,13 +978,11 @@ def finish_screen(screen, ui, score, total):
                 if menu_btn.hit(event.pos):
                     return "menu"
 
-        screen.fill(BG)
-        # Pastel header strip
-        header_h = int(160 * ui.s)
-        pygame.draw.rect(screen, LIGHT_P, (0, 0, ui.w, header_h - 6))
-        pygame.draw.rect(screen, LAVENDER, (0, header_h - 6, ui.w, 6))
-        t1 = ui.font_menu_title.render("Ready!", True, BLACK)
-        t2 = ui.font_menu_btn.render("Score: {}/{}".format(score, total), True, PURPLE)
+        draw_background(screen, ui.w, ui.h)
+        draw_panel(screen, ui.panel_rect, max(24, int(32 * ui.s)))
+        draw_ribbon_title(screen, "Game 2", ui.panel_rect, ui.font_menu_title, ui.s)
+        t1 = render_tracked_text(ui.font_menu_title, "Ready!", BLACK, tracking=1)
+        t2 = render_tracked_text(ui.font_menu_btn, "Score: {}/{}".format(score, total), TEXT_SOFT, tracking=1)
         screen.blit(t1, t1.get_rect(center=(ui.w // 2, int(240 * ui.s))))
         screen.blit(t2, t2.get_rect(center=(ui.w // 2, int(330 * ui.s))))
 

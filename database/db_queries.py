@@ -4,6 +4,9 @@ from pathlib import Path
 
 DB_PATH = Path(__file__).with_name("app.db")
 
+import os
+print("CWD:", os.getcwd())
+print("DB path:", os.path.abspath("some_path.db"))
 
 def get_connection():
     return sqlite3.connect(DB_PATH)
