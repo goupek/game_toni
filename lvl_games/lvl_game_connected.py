@@ -287,6 +287,24 @@ def wrap_text(text: str, font: pygame.font.Font, max_width: int) -> List[str]:
     return lines
 
 
+def _tracked_text_width(font: pygame.font.Font, text: str, letter_spacing: int = 0) -> int:
+    if not text:
+        return 0
+    glyphs = [font.render(ch, True, (0, 0, 0)) for ch in text]
+    width = sum(g.get_width() for g in glyphs)
+    width += letter_spacing * max(0, len(glyphs) - 1)
+    return width
+
+
+def draw_tracked_text(surface: pygame.Surface, text: str, font: pygame.font.Font, color: Color,
+                      pos: Tuple[int, int], letter_spacing: int = 0):
+    x, y = pos
+    for ch in text:
+        glyph = font.render(ch, True, color)
+        surface.blit(glyph, (x, y))
+        x += glyph.get_width() + letter_spacing
+
+
 
 def draw_background(surface: pygame.Surface):
     w, h = surface.get_size()
@@ -323,12 +341,16 @@ def draw_panel(surface: pygame.Surface, rect: pygame.Rect, radius: int = 28):
 
 
 
-def draw_ribbon_title(surface: pygame.Surface, text: str, panel_rect: pygame.Rect, font: pygame.font.Font):
+def get_ribbon_rect(panel_rect: pygame.Rect) -> pygame.Rect:
     ribbon_h = 72
     ribbon_w = int(panel_rect.w * 1.08)
     ribbon_x = panel_rect.centerx - ribbon_w // 2
     ribbon_y = panel_rect.y + 22
-    ribbon = pygame.Rect(ribbon_x, ribbon_y, ribbon_w, ribbon_h)
+    return pygame.Rect(ribbon_x, ribbon_y, ribbon_w, ribbon_h)
+
+
+def draw_ribbon_title(surface: pygame.Surface, text: str, panel_rect: pygame.Rect, font: pygame.font.Font):
+    ribbon = get_ribbon_rect(panel_rect)
 
     tail_w = 32
     left_tail = [
@@ -353,11 +375,8 @@ def draw_ribbon_title(surface: pygame.Surface, text: str, panel_rect: pygame.Rec
     pygame.draw.rect(surface, RIBBON_LIGHT, pygame.Rect(ribbon.x, ribbon.y, ribbon.w, 12))
     pygame.draw.line(surface, RIBBON_DARK, (ribbon.left, ribbon.bottom - 3), (ribbon.right, ribbon.bottom - 3), 3)
 
-    shadow = font.render(text, True, OUTLINE_DARK)
     text_surf = font.render(text, True, TEXT_LIGHT)
     tr = text_surf.get_rect(center=ribbon.center)
-    for ox, oy in ((-2, 0), (2, 0), (0, -2), (0, 2), (-1, -1), (1, 1), (-1, 1), (1, -1)):
-        surface.blit(shadow, shadow.get_rect(center=(tr.centerx + ox, tr.centery + oy)))
     surface.blit(text_surf, tr)
 
 
@@ -401,11 +420,11 @@ def draw_button(surface: pygame.Surface, rect: pygame.Rect, label: str, fill: Co
     pygame.draw.rect(surface, lighten(top_fill, 18), (rect.x + 6, rect.y + 5, rect.w - 12, 12), border_radius=10)
     pygame.draw.rect(surface, PANEL_BORDER, rect, width=2, border_radius=18)
 
-    shadow = font.render(label, True, OUTLINE_DARK)
-    text = font.render(label, True, text_color if enabled else TEXT_SOFT)
-    tr = text.get_rect(center=(rect.centerx, rect.centery + 1))
-    surface.blit(shadow, shadow.get_rect(center=(tr.centerx + 1, tr.centery + 2)))
-    surface.blit(text, tr)
+    text_color = text_color if enabled else TEXT_SOFT
+    text_w = _tracked_text_width(font, label, letter_spacing=1)
+    text_h = font.get_height()
+    text_pos = (rect.centerx - text_w // 2, rect.centery - text_h // 2 + 1)
+    draw_tracked_text(surface, label, font, text_color, text_pos, letter_spacing=1)
 
 
 class PygameButton:
@@ -439,6 +458,16 @@ class ImprovedRussianGame:
         self.screen = pygame.display.set_mode((V_W, V_H), pygame.RESIZABLE)
         pygame.display.set_caption("🧸 Диагностика уровня (Русский)")
         self.clock = pygame.time.Clock()
+        self.canvas = pygame.Surface((V_W, V_H)).convert()
+
+        self.font_title = _best_font(34, bold=True)
+        self.font_header = _best_font(24, bold=True)
+        self.font_question = _best_font(22, bold=True)
+        self.font_word = _best_font(30, bold=True)
+        self.font_button = _best_font(24, bold=True)
+        self.font_small = _best_font(18, bold=True)
+        self.font_icon = _best_font(22, bold=True)
+        self.emoji_size = 90
 
         self.ollama_url = "http://localhost:11434"
         self.model = "qwen2.5:1.7b"
@@ -623,16 +652,16 @@ class ImprovedRussianGame:
     # ── UI ───────────────────────────────────────────────────────────────────
     def create_ui(self):
         self.main_panel = pygame.Rect(120, 92, 1040, 650)
-        self.question_card = pygame.Rect(184, 176, 912, 210)
+        self.question_card = pygame.Rect(205, 228, 870, 162)
         self.answer_area = pygame.Rect(184, 410, 912, 250)
 
-        self.btn_close = PygameButton(pygame.Rect(V_W - 180, 40, 120, 54), "Exit", BTN_RED, BTN_RED_DARK, TEXT_LIGHT)
+        self.btn_close = PygameButton(pygame.Rect(self.main_panel.right - 120, 22, 120, 54), "Back", BTN_RED, BTN_RED_DARK, TEXT_LIGHT)
         self.btn_start = PygameButton(pygame.Rect(V_W // 2 - 150, V_H // 2 + 150, 300, 72), "Start", BTN_YELLOW, BTN_YELLOW_DARK)
         self.btn_result_close = PygameButton(pygame.Rect(V_W // 2 - 150, V_H // 2 + 210, 300, 72), "Close", BTN_YELLOW, BTN_YELLOW_DARK)
 
         choice_w, choice_h = 400, 88
         x1, x2 = 205, 675
-        y1, y2 = 430, 540
+        y1, y2 = 438, 546
         self.choice_buttons: List[PygameButton] = [
             PygameButton(pygame.Rect(x1, y1, choice_w, choice_h), "", DEFAULT_CHOICE_FILL, DEFAULT_CHOICE_DEPTH, TEXT_LIGHT),
             PygameButton(pygame.Rect(x2, y1, choice_w, choice_h), "", DEFAULT_CHOICE_FILL, DEFAULT_CHOICE_DEPTH, TEXT_LIGHT),
@@ -652,12 +681,13 @@ class ImprovedRussianGame:
         g = int(200 * (1 - difficulty))
         color = (r, g, 64)
         pygame.draw.rect(surface, color, fill_rect, border_radius=rect.h // 2)
-        label = f"Сложность вопроса: {difficulty:.2f}"
+        difficulty_pct = int(round(difficulty * 100))
+        label = f"Сложность вопроса: {difficulty_pct}%"
         txt = self.font_small.render(label, True, TEXT_DARK)
         surface.blit(txt, txt.get_rect(center=rect.center))
 
     def _header_text_for_topic(self, topic: Dict[str, Any]) -> str:
-        return f"{topic.get('icon', FALLBACK_TOPIC_ICON)} {topic['name_ru']} ({topic['name_en']})"
+        return f"{topic['name_ru']} ({topic['name_en']})"
 
     def _set_current_topic(self, topic: Dict[str, Any]):
         self.current_topic = topic
@@ -1366,19 +1396,22 @@ If direction == \"en_to_ru\": shown is English word, correct is Russian.
 
         self.btn_close.draw(c, self.font_button)
 
-        draw_badge(c, pygame.Rect(880, 54, 190, 46), "★", str(self._asked_total), self.font_small, self.font_icon)
-        draw_badge(c, pygame.Rect(880, 112, 190, 46), "✓", self.live_level_text or "A1: —  |  A2 🔒: —", self.font_small, self.font_icon)
-
         # Topic banner
-        topic_rect = pygame.Rect(210, 116, 760, 58)
+        ribbon_rect = get_ribbon_rect(self.main_panel)
+        topic_rect = pygame.Rect(0, 0, 760, 54)
+        topic_rect.centerx = ribbon_rect.centerx
+        topic_rect.centery = ribbon_rect.centery
         pygame.draw.rect(c, BTN_CREAM, topic_rect, border_radius=18)
         pygame.draw.rect(c, PANEL_BORDER, topic_rect, 2, border_radius=18)
-        self._draw_text_block(c, self._header_text_for_topic(self.current_topic), topic_rect, self.font_header, TEXT_DARK, max_lines=2)
+        header_text = self._header_text_for_topic(self.current_topic)
+        header_w = _tracked_text_width(self.font_header, header_text, letter_spacing=1)
+        header_pos = (topic_rect.centerx - header_w // 2, topic_rect.centery - self.font_header.get_height() // 2)
+        draw_tracked_text(c, header_text, self.font_header, TEXT_DARK, header_pos, letter_spacing=1)
 
         # Question card
         draw_panel(c, self.question_card, radius=24)
 
-        emoji_slot = pygame.Rect(self.question_card.x + 26, self.question_card.y + 32, 112, 112)
+        emoji_slot = pygame.Rect(self.question_card.x + 24, self.question_card.y + 24, 92, 92)
         pygame.draw.rect(c, HUD_CREAM, emoji_slot, border_radius=18)
         pygame.draw.rect(c, HUD_BORDER, emoji_slot, 2, border_radius=18)
         if self.current_emoji_surface is not None:
@@ -1388,28 +1421,27 @@ If direction == \"en_to_ru\": shown is English word, correct is Russian.
             t = emoji_f.render(self.current_emoji_text or "?", True, TEXT_DARK)
             c.blit(t, t.get_rect(center=emoji_slot.center))
 
-        question_text_rect = pygame.Rect(self.question_card.x + 160, self.question_card.y + 28, 690, 56)
+        question_text_rect = pygame.Rect(self.question_card.x + 142, self.question_card.y + 22, 640, 42)
         self._draw_text_block(c, self.question_text, question_text_rect, self.font_question, TEXT_SOFT, align="left", max_lines=2)
 
-        word_box = pygame.Rect(self.question_card.x + 160, self.question_card.y + 86, 690, 68)
+        word_box = pygame.Rect(self.question_card.x + 142, self.question_card.y + 72, 640, 54)
         pygame.draw.rect(c, lighten(BTN_YELLOW, 8), word_box, border_radius=18)
         pygame.draw.rect(c, PANEL_BORDER, word_box, 2, border_radius=18)
-        self._draw_text_block(c, self.shown_text, word_box, self.font_word, TEXT_DARK, max_lines=1)
+        shown_text = self.shown_text or ""
+        shown_spacing = 6 if len(shown_text.strip()) <= 3 else 2
+        shown_w = _tracked_text_width(self.font_word, shown_text, letter_spacing=shown_spacing)
+        shown_pos = (word_box.centerx - shown_w // 2, word_box.centery - self.font_word.get_height() // 2)
+        draw_tracked_text(c, shown_text, self.font_word, TEXT_DARK, shown_pos, letter_spacing=shown_spacing)
 
-        status_rect = pygame.Rect(self.question_card.x + 160, self.question_card.y + 158, 690, 28)
+        status_rect = pygame.Rect(self.question_card.x + 142, self.question_card.y + 130, 640, 24)
         status_color = CORRECT_FILL if self._current_word_level == "A1" else BTN_ORANGE_DARK
         self._draw_text_block(c, self.status_text, status_rect, self.font_small, status_color, align="left", max_lines=1)
 
-        # Difficulty bar
-        self._draw_difficulty_bar(c, pygame.Rect(245, 664, 670, 24), self._current_difficulty)
+        self._draw_difficulty_bar(c, pygame.Rect(205, 666, 870, 24), self._current_difficulty)
 
         # Choices
         for btn in self.choice_buttons:
             btn.draw(c, self.font_button)
-
-        # Sub text
-        sub = self.font_small.render(self.sub_text, True, TEXT_DARK)
-        c.blit(sub, (180, 704))
 
         if self.is_generating and not self.start_overlay and not self.result_overlay:
             loader_rect = pygame.Rect(390, 720, 500, 54)
