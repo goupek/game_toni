@@ -744,7 +744,31 @@ class StoryGame:
         body = "Думаю над подсказкой..." if self.hint_loading else self.hint_text
         pad = max(8, int(16 * self.ui.s))
         title_gap = max(6, int(8 * self.ui.s))
-        card_h = max(int(128 * self.ui.s), self.ui.font_small.get_height() + self.ui.font_hint.get_height() * 3 + pad * 2)
+        max_card_h = max(int(self.ui.image_area.h * 0.52), int(156 * self.ui.s))
+        font = self.ui.font_hint
+        text_w = self.ui.image_area.w - pad * 4
+        lines = wrap_text(body, font, text_w)
+        line_gap = max(2, int(4 * self.ui.s))
+        title_h = self.ui.font_small.get_height()
+        body_h = len(lines) * font.get_linesize() + max(0, len(lines) - 1) * line_gap
+        card_h = max(int(128 * self.ui.s), title_h + title_gap + body_h + pad * 2)
+
+        while card_h > max_card_h and font.get_height() > 18:
+            font = _best_font(font.get_height() - 1)
+            lines = wrap_text(body, font, text_w)
+            body_h = len(lines) * font.get_linesize() + max(0, len(lines) - 1) * line_gap
+            card_h = max(int(128 * self.ui.s), title_h + title_gap + body_h + pad * 2)
+
+        if card_h > max_card_h:
+            max_lines = max(3, (max_card_h - title_h - title_gap - pad * 2) // max(1, font.get_linesize() + line_gap))
+            lines = lines[:max_lines]
+            if lines:
+                while font.size(lines[-1] + "...")[0] > text_w and lines[-1]:
+                    lines[-1] = lines[-1][:-1]
+                lines[-1] = lines[-1].rstrip(" .,;:") + "..."
+            body_h = len(lines) * font.get_linesize() + max(0, len(lines) - 1) * line_gap
+            card_h = min(max_card_h, max(int(128 * self.ui.s), title_h + title_gap + body_h + pad * 2))
+
         card_rect = pygame.Rect(
             self.ui.image_area.x + pad,
             self.ui.image_area.bottom - card_h - pad,
@@ -759,12 +783,11 @@ class StoryGame:
         title = render_tracked_text(self.ui.font_small, "Hint", TEXT_DARK, tracking=1)
         self.screen.blit(title, (card_rect.x + pad, card_rect.y + pad))
 
-        lines = wrap_text(body, self.ui.font_hint, card_rect.w - pad * 2)
         y = card_rect.y + pad + title.get_height() + title_gap
-        for line in lines[:3]:
-            txt = render_tracked_text(self.ui.font_hint, line, BLACK, tracking=1)
+        for line in lines:
+            txt = render_tracked_text(font, line, BLACK, tracking=1)
             self.screen.blit(txt, (card_rect.x + pad, y))
-            y += txt.get_height() + max(2, int(4 * self.ui.s))
+            y += font.get_linesize() + line_gap
 
     def draw_progress(self):
         total = len(self.rounds)

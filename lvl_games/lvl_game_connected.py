@@ -247,6 +247,11 @@ def blit_scaled(screen, canvas, new_size, offset):
     pygame.display.flip()
 
 
+def _initial_window_size() -> Tuple[int, int]:
+    info = pygame.display.Info()
+    return (max(1, min(info.current_w, V_W)), max(1, min(info.current_h, V_H)))
+
+
 
 def _best_font(size: int, bold: bool = True) -> pygame.font.Font:
     for name in ("Baloo 2", "Fredoka", "Nunito", "Arial", "DejaVu Sans", ""):
@@ -455,7 +460,7 @@ class ImprovedRussianGame:
         except Exception:
             pass
 
-        self.screen = pygame.display.set_mode((V_W, V_H), pygame.RESIZABLE)
+        self.screen = pygame.display.set_mode(_initial_window_size(), pygame.RESIZABLE)
         pygame.display.set_caption("🧸 Диагностика уровня (Русский)")
         self.clock = pygame.time.Clock()
         self.canvas = pygame.Surface((V_W, V_H)).convert()
