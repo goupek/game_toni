@@ -2,14 +2,15 @@ import sqlite3
 from collections import OrderedDict
 from pathlib import Path
 
-DB_PATH = Path(__file__).with_name("app.db")
+from database.bootstrap import ensure_database_ready
 
-import os
-print("CWD:", os.getcwd())
-print("DB path:", os.path.abspath("some_path.db"))
+DB_PATH = Path(__file__).with_name("app.db")
+ensure_database_ready(verbose=False)
 
 def get_connection():
-    return sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("PRAGMA foreign_keys = ON")
+    return conn
 
 
 def get_topics_with_words():
@@ -80,7 +81,7 @@ def get_topics_with_words():
 
 
 def get_words_by_topic_key(topic_key):
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     conn.row_factory = sqlite3.Row
 
     query = """
@@ -104,7 +105,7 @@ def get_words_by_topic_key(topic_key):
 
 
 def get_word_id_by_ru_en(ru, en):
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     conn.row_factory = sqlite3.Row
 
     # Try lemma match first
@@ -132,7 +133,7 @@ def get_word_id_by_ru_en(ru, en):
 
 
 def ensure_default_user():
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     conn.row_factory = sqlite3.Row
 
     row = conn.execute("""
@@ -149,7 +150,7 @@ def ensure_default_user():
     cursor = conn.execute("""
         INSERT INTO users (user_name)
         VALUES (?)
-    """, ("Player",))
+    """, ("Player 1",))
     conn.commit()
     user_id = cursor.lastrowid
     conn.close()
@@ -157,7 +158,7 @@ def ensure_default_user():
 
 
 def upsert_user_word_progress(user_id, word_id, was_correct):
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
 
     if was_correct:
         conn.execute("""
@@ -204,7 +205,7 @@ def save_level_game_history(history, game_name="level_game"):
     Progress updates are handled separately in update_from_level_game().
     """
     user_id = ensure_default_user()
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     cur = conn.cursor()
 
     # Ensure the game row exists
@@ -265,7 +266,7 @@ def save_level_game_history(history, game_name="level_game"):
 
 
 def get_user_word_progress(user_id=None):
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     conn.row_factory = sqlite3.Row
 
     if user_id is None:
@@ -304,7 +305,7 @@ def get_game2_vocab_by_manifest(manifest):
     Returns:
         dict with keys "nouns", "adjectives", "numbers" containing full structures.
     """
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     conn.row_factory = sqlite3.Row
     
     result = {

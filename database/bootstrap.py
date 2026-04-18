@@ -13,27 +13,58 @@ def connect_db():
     return sqlite3.connect(DB_PATH)
 
 
+REQUIRED_TABLES = {
+    "users",
+    "topics",
+    "words",
+    "word_translations",
+    "word_forms",
+    "user_word_progress",
+    "games",
+    "game_events",
+}
+
+
+def _has_required_tables(conn):
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT name
+        FROM sqlite_master
+        WHERE type = 'table'
+    """)
+    table_names = {row[0] for row in cur.fetchall()}
+    return REQUIRED_TABLES.issubset(table_names)
+
+
+def _safe_count(conn, table_name):
+    cur = conn.cursor()
+    cur.execute(f"SELECT COUNT(*) FROM {table_name}")
+    return cur.fetchone()[0]
+
+
 def reset_db():
     if DB_PATH.exists():
         DB_PATH.unlink()
         print(f"Deleted existing database: {DB_PATH}")
 
 
-def init_schema(conn):
+def init_schema(conn, verbose=True):
     with open(SCHEMA_PATH, "r", encoding="utf-8") as f:
         schema_sql = f.read()
     conn.executescript(schema_sql)
     conn.commit()
-    print("Schema initialized.")
+    if verbose:
+        print("Schema initialized.")
 
 
-def ensure_default_user(conn, user_name="Player 1"):
+def ensure_default_user(conn, user_name="Player 1", verbose=True):
     cur = conn.cursor()
     cur.execute("SELECT user_id FROM users WHERE user_name = ?", (user_name,))
     row = cur.fetchone()
 
     if row:
-        print(f"Default user already exists: {user_name} (user_id={row[0]})")
+        if verbose:
+            print(f"Default user already exists: {user_name} (user_id={row[0]})")
         return row[0]
 
     cur.execute(
@@ -42,23 +73,26 @@ def ensure_default_user(conn, user_name="Player 1"):
     )
     conn.commit()
     user_id = cur.lastrowid
-    print(f"Created default user: {user_name} (user_id={user_id})")
+    if verbose:
+        print(f"Created default user: {user_name} (user_id={user_id})")
     return user_id
 
 
-def ensure_level_game(conn):
+def ensure_level_game(conn, verbose=True):
     cur = conn.cursor()
     cur.execute("SELECT game_id FROM games WHERE game_name = ?", ("level_game",))
     row = cur.fetchone()
 
     if row:
-        print(f"Game already exists: level_game (game_id={row[0]})")
+        if verbose:
+            print(f"Game already exists: level_game (game_id={row[0]})")
         return row[0]
 
     cur.execute("INSERT INTO games (game_name) VALUES (?)", ("level_game",))
     conn.commit()
     game_id = cur.lastrowid
-    print(f"Created game: level_game (game_id={game_id})")
+    if verbose:
+        print(f"Created game: level_game (game_id={game_id})")
     return game_id
 
 
@@ -126,7 +160,7 @@ def insert_forms(cur, word_id, forms_dict):
         """, (word_id, str(form_type), str(form_value).strip()))
 
 
-def import_extended_vocab(conn):
+def import_extended_vocab(conn, verbose=True):
     with open(JSON_PATH, "r", encoding="utf-8") as f:
         data = json.load(f)
 
@@ -166,7 +200,48 @@ def import_extended_vocab(conn):
             insert_forms(cur, word_id, normalized_forms)
 
     conn.commit()
-    print("Extended vocab imported.")
+    if verbose:
+        print("Extended vocab imported.")
+
+
+def ensure_database_ready(user_name="Player 1", verbose=False):
+    """
+    Create and seed the SQLite database when it is missing or empty.
+
+    This is safe to call at runtime before launching a game.
+    """
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    conn = connect_db()
+
+    try:
+        schema_created = False
+        vocab_seeded = False
+
+        if not _has_required_tables(conn):
+            init_schema(conn, verbose=verbose)
+            schema_created = True
+
+        topics_count = _safe_count(conn, "topics")
+        words_count = _safe_count(conn, "words")
+        translations_count = _safe_count(conn, "word_translations")
+        forms_count = _safe_count(conn, "word_forms")
+
+        if topics_count == 0 and words_count == 0 and translations_count == 0 and forms_count == 0:
+            import_extended_vocab(conn, verbose=verbose)
+            vocab_seeded = True
+
+        user_id = ensure_default_user(conn, user_name=user_name, verbose=verbose)
+        game_id = ensure_level_game(conn, verbose=verbose)
+
+        return {
+            "db_path": str(DB_PATH),
+            "schema_created": schema_created,
+            "vocab_seeded": vocab_seeded,
+            "user_id": user_id,
+            "game_id": game_id,
+        }
+    finally:
+        conn.close()
 
 
 def print_summary(conn):
@@ -195,13 +270,10 @@ def main():
     if args.reset:
         reset_db()
 
-    conn = connect_db()
+    ensure_database_ready(user_name=args.user, verbose=True)
 
+    conn = connect_db()
     try:
-        init_schema(conn)
-        ensure_default_user(conn, args.user)
-        ensure_level_game(conn)
-        import_extended_vocab(conn)
         print_summary(conn)
         print(f"\nDatabase ready: {DB_PATH}")
     finally:
